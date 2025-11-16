@@ -26,7 +26,6 @@ jobs:
           key: ubuntu-latest-1.25-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ubuntu-latest-1.25-go-
-            ubuntu-latest-1.23-go-
 
       # Get the version from the tag
       - name: Get the version
