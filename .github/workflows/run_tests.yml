@@ -31,4 +31,8 @@ jobs:
       - name: Create test artifacts directory
         run: mkdir -p cmd/test_artifacts
       - name: Run tests
-        run: go test -v -cover ./...
+        run: go test -v -cover -timeout 10m ./...
+        continue-on-error: false
+      - name: Cleanup test artifacts
+        if: always()
+        run: rm -rf cmd/test_artifacts || true
