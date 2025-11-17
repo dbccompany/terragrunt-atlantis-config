@@ -36,7 +36,16 @@ jobs:
         env:
           CGO_ENABLED: 0
           GOFLAGS: -mod=readonly
-        run: go test -v -cover -timeout 10m -count=1 ./...
+        run: |
+          set -e
+          go test -v -cover -timeout 10m -count=1 -failfast ./... 2>&1 | tee test_output.log || {
+            echo "Tests failed or crashed. Checking for panics..."
+            if grep -q "panic:" test_output.log 2>/dev/null || grep -q "fatal error:" test_output.log 2>/dev/null; then
+              echo "::error::Test crash detected. Full output:"
+              cat test_output.log
+            fi
+            exit 1
+          }
         continue-on-error: false
       - name: Cleanup test artifacts
         if: always()
