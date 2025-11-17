@@ -36,9 +36,17 @@ jobs:
         env:
           CGO_ENABLED: 0
           GOFLAGS: -mod=readonly
+          TF_LOG: ""
         run: |
           set +e
-          go test -v -cover -timeout 10m -count=1 -parallel 4 ./... 2>&1 | tee test_output.log
+          # Run tests and filter out expected terragrunt parsing errors
+          go test -v -cover -timeout 10m -count=1 -parallel 4 ./... 2>&1 | \
+            grep -v "Error: Error in function call" | \
+            grep -v "on.*line.*in locals:" | \
+            grep -v "Call to function.*failed: ParentFileNotFoundError" | \
+            grep -v "Could not find.*in any of the parent folders" | \
+            grep -v "Cause: Traversed all the way to the root" | \
+            tee test_output.log
           TEST_EXIT_CODE=${PIPESTATUS[0]}
           if [ $TEST_EXIT_CODE -ne 0 ]; then
             echo "::error::Tests exited with code $TEST_EXIT_CODE"
