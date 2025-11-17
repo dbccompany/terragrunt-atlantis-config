@@ -1,8 +1,5 @@
 name: Build and test code
-on: 
-  push:
-  pull_request:
-  workflow_dispatch:
+on: [push, pull_request]
 
 jobs:
   run-tests:
@@ -17,77 +14,11 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "^${{ matrix.golang-version }}"
-      - name: Verify Go version
-        run: go version && go env GOROOT && go env GOPATH
-      - name: Clear Go module cache
-        run: go clean -modcache || true
-      - name: Cache Go modules
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: ~/go/pkg/mod
           key: ${{ matrix.os }}-${{ matrix.golang-version }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ matrix.os }}-${{ matrix.golang-version }}-go-
-      - name: Download dependencies
-        run: go mod download
-      - name: Create test artifacts directory
-        run: mkdir -p cmd/test_artifacts
-      - name: Run tests
-        env:
-          CGO_ENABLED: 0
-          GOFLAGS: -mod=readonly
-          TF_LOG: ""
-        run: |
-          set +e
-          # Run tests and capture full output first
-          go test -v -cover -timeout 10m -count=1 -parallel 4 ./... > test_output_raw.log 2>&1
-          TEST_EXIT_CODE=$?
-          # Filter out expected terragrunt parsing errors for display
-          # These errors are expected from test examples with missing files
-          # Remove entire error blocks using sed (more reliable than multiple greps)
-          sed '/Error: Error in function call/,/Cause: Traversed all the way to the root\./d' test_output_raw.log | \
-            sed '/\[0;90m.*\[0;31mERROR.*Error: Error in function call/d' | \
-            sed '/\[0;90m.*\[0;31mERROR.*on.*line.*in locals:/d' | \
-            sed '/\[0;90m.*\[0;31mERROR.*Call to function/d' | \
-            sed '/\[0;90m.*\[0;31mERROR.*Could not find/d' | \
-            sed '/\[0;90m.*\[0;31mERROR.*Cause:/d' | \
-            sed '/\[0;90m.*\[0;31mERROR.*environment_vars/d' | \
-            sed '/^\[0;90m.*\[0;31mERROR[[:space:]]*$/d' | \
-            sed '/^Error: extra_atlantis_dependencies contains non-string value at position/d' | \
-            tee test_output.log || true
-          if [ $TEST_EXIT_CODE -ne 0 ]; then
-            echo "::error::Tests exited with code $TEST_EXIT_CODE"
-            if grep -q "panic:" test_output_raw.log 2>/dev/null; then
-              echo "::error::Panic detected in tests:"
-              grep -A 20 "panic:" test_output_raw.log || true
-            fi
-            if grep -q "fatal error:" test_output_raw.log 2>/dev/null; then
-              echo "::error::Fatal error detected in tests:"
-              grep -A 20 "fatal error:" test_output_raw.log || true
-            fi
-            echo "Full test output (unfiltered):"
-            cat test_output_raw.log
-            exit $TEST_EXIT_CODE
-          fi
-        continue-on-error: false
-      - name: Upload test logs
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-logs-${{ matrix.os }}
-          path: |
-            test_output.log
-            test_output_raw.log
-          if-no-files-found: ignore
-      - name: Cleanup test artifacts
-        if: always()
-        run: |
-          case "${{ runner.os }}" in
-            Windows)
-              powershell -Command "if (Test-Path 'cmd\test_artifacts') { Remove-Item -Recurse -Force 'cmd\test_artifacts' }"
-              ;;
-            *)
-              rm -rf cmd/test_artifacts || true
-              ;;
-          esac
-        shell: bash
+      - run: mkdir cmd/test_artifacts
+      - run: go test -v -cover ./...
