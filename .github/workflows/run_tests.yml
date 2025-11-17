@@ -24,15 +24,5 @@ jobs:
             ${{ matrix.os }}-${{ matrix.golang-version }}-go-
       - name: Download dependencies
         run: go mod download
-      - name: Create test artifacts directory
-        run: |
-          case "${{ runner.os }}" in
-            Windows)
-              powershell -Command "if (-not (Test-Path 'cmd\test_artifacts')) { New-Item -ItemType Directory -Path 'cmd\test_artifacts' | Out-Null }"
-              ;;
-            *)
-              mkdir -p cmd/test_artifacts
-              ;;
-          esac
-        shell: bash
+      - run: mkdir cmd/test_artifacts
       - run: go test -v -cover ./...
