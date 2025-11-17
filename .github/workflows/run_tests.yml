@@ -31,7 +31,10 @@ jobs:
       - name: Create test artifacts directory
         run: mkdir -p cmd/test_artifacts
       - name: Run tests
-        run: go test -v -cover -timeout 10m ./...
+        env:
+          CGO_ENABLED: 0
+          GOFLAGS: -mod=readonly
+        run: go test -v -cover -timeout 10m -count=1 ./...
         continue-on-error: false
       - name: Cleanup test artifacts
         if: always()
