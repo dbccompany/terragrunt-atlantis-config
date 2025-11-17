@@ -24,5 +24,12 @@ jobs:
             ${{ matrix.os }}-${{ matrix.golang-version }}-go-
       - name: Download dependencies
         run: go mod download
-      - run: mkdir cmd/test_artifacts
+      - name: Create test artifacts directory
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            if (-not (Test-Path "cmd\test_artifacts")) { New-Item -ItemType Directory -Path "cmd\test_artifacts" | Out-Null }
+          else
+            mkdir -p cmd/test_artifacts
+          fi
+        shell: bash
       - run: go test -v -cover ./...
