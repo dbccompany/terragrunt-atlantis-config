@@ -37,8 +37,11 @@ jobs:
         shell: bash
       - name: Run tests
         run: |
-          go test -v -cover ./... 2>&1 | \
-            sed '/Error: Error in function call/,/Cause: Traversed all the way to the root\./d' | \
+          set +e
+          go test -v -cover ./... > test_output_raw.log 2>&1
+          TEST_EXIT_CODE=$?
+          # Filter out expected terragrunt parsing errors for cleaner output
+          sed '/Error: Error in function call/,/Cause: Traversed all the way to the root\./d' test_output_raw.log | \
             sed '/^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9][0-9][0-9] ERROR/d' | \
             sed '/^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9][0-9][0-9] ERROR.*Error: Error in function call/d' | \
             sed '/^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9][0-9][0-9] ERROR.*on.*line.*in locals:/d' | \
@@ -46,4 +49,5 @@ jobs:
             sed '/^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9][0-9][0-9] ERROR.*Could not find/d' | \
             sed '/^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9][0-9][0-9] ERROR.*Cause:/d' | \
             sed '/^[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9][0-9][0-9] ERROR.*environment_vars/d' | \
-            sed '/^Error: extra_atlantis_dependencies contains non-string value at position/d'
+            sed '/^Error: extra_atlantis_dependencies contains non-string value at position/d' || true
+          exit $TEST_EXIT_CODE
