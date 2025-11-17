@@ -14,10 +14,10 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "^${{ matrix.golang-version }}"
+        id: go
       - name: Configure Go environment for Windows
         if: runner.os == 'Windows'
         run: |
-          echo "GOROOT=${{ env.GOROOT }}" >> $GITHUB_ENV
           echo "GOTOOLCHAIN=local" >> $GITHUB_ENV
           echo "GOPROXY=https://proxy.golang.org,direct" >> $GITHUB_ENV
         shell: bash
