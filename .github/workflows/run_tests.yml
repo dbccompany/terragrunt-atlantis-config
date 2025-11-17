@@ -17,9 +17,20 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "^${{ matrix.golang-version }}"
+      - name: Clear Go module cache
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            if (Test-Path "$env:USERPROFILE\go\pkg\mod") {
+              Remove-Item -Recurse -Force "$env:USERPROFILE\go\pkg\mod"
+            }
+          else
+            if [ -d "$HOME/go/pkg/mod" ]; then
+              rm -rf "$HOME/go/pkg/mod"
+            fi
+          fi
+        shell: bash
       - name: Cache Go modules
         uses: actions/cache@v4
-        continue-on-error: true
         with:
           path: ~/go/pkg/mod
           key: ${{ matrix.os }}-${{ matrix.golang-version }}-go-${{ hashFiles('**/go.sum') }}
