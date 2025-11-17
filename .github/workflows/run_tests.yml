@@ -26,10 +26,13 @@ jobs:
         run: go mod download
       - name: Create test artifacts directory
         run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            if (-not (Test-Path "cmd\test_artifacts")) { New-Item -ItemType Directory -Path "cmd\test_artifacts" | Out-Null }
-          else
-            mkdir -p cmd/test_artifacts
-          fi
+          case "${{ runner.os }}" in
+            Windows)
+              powershell -Command "if (-not (Test-Path 'cmd\test_artifacts')) { New-Item -ItemType Directory -Path 'cmd\test_artifacts' | Out-Null }"
+              ;;
+            *)
+              mkdir -p cmd/test_artifacts
+              ;;
+          esac
         shell: bash
       - run: go test -v -cover ./...
