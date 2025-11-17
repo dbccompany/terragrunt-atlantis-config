@@ -47,12 +47,22 @@ jobs:
             exit 1
           }
         continue-on-error: false
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ matrix.os }}
+          path: test_output.log
+          if-no-files-found: ignore
       - name: Cleanup test artifacts
         if: always()
         run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            if (Test-Path "cmd\test_artifacts") { Remove-Item -Recurse -Force "cmd\test_artifacts" }
-          else
-            rm -rf cmd/test_artifacts || true
-          fi
+          case "${{ runner.os }}" in
+            Windows)
+              powershell -Command "if (Test-Path 'cmd\test_artifacts') { Remove-Item -Recurse -Force 'cmd\test_artifacts' }"
+              ;;
+            *)
+              rm -rf cmd/test_artifacts || true
+              ;;
+          esac
         shell: bash
