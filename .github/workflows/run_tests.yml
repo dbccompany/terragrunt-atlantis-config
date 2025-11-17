@@ -39,27 +39,28 @@ jobs:
           TF_LOG: ""
         run: |
           set +e
-          # Run tests and filter out expected terragrunt parsing errors
-          go test -v -cover -timeout 10m -count=1 -parallel 4 ./... 2>&1 | \
-            grep -v "Error: Error in function call" | \
+          # Run tests and capture full output first
+          go test -v -cover -timeout 10m -count=1 -parallel 4 ./... > test_output_raw.log 2>&1
+          TEST_EXIT_CODE=$?
+          # Filter out expected terragrunt parsing errors for display
+          grep -v "Error: Error in function call" test_output_raw.log | \
             grep -v "on.*line.*in locals:" | \
             grep -v "Call to function.*failed: ParentFileNotFoundError" | \
             grep -v "Could not find.*in any of the parent folders" | \
             grep -v "Cause: Traversed all the way to the root" | \
-            tee test_output.log
-          TEST_EXIT_CODE=${PIPESTATUS[0]}
+            tee test_output.log || true
           if [ $TEST_EXIT_CODE -ne 0 ]; then
             echo "::error::Tests exited with code $TEST_EXIT_CODE"
-            if grep -q "panic:" test_output.log 2>/dev/null; then
+            if grep -q "panic:" test_output_raw.log 2>/dev/null; then
               echo "::error::Panic detected in tests:"
-              grep -A 20 "panic:" test_output.log || true
+              grep -A 20 "panic:" test_output_raw.log || true
             fi
-            if grep -q "fatal error:" test_output.log 2>/dev/null; then
+            if grep -q "fatal error:" test_output_raw.log 2>/dev/null; then
               echo "::error::Fatal error detected in tests:"
-              grep -A 20 "fatal error:" test_output.log || true
+              grep -A 20 "fatal error:" test_output_raw.log || true
             fi
-            echo "Full test output:"
-            cat test_output.log
+            echo "Full test output (unfiltered):"
+            cat test_output_raw.log
             exit $TEST_EXIT_CODE
           fi
         continue-on-error: false
@@ -68,7 +69,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-logs-${{ matrix.os }}
-          path: test_output.log
+          path: |
+            test_output.log
+            test_output_raw.log
           if-no-files-found: ignore
       - name: Cleanup test artifacts
         if: always()
