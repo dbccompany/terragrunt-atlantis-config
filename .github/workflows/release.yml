@@ -14,7 +14,7 @@ jobs:
       # Install golang
       - uses: actions/setup-go@v5
         with:
-          go-version: "^1.25"
+          go-version: "^1.25.4"
 
       # Checkout code
       - uses: actions/checkout@v4
@@ -23,9 +23,9 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/go/pkg/mod
-          key: ubuntu-latest-1.25-go-${{ hashFiles('**/go.sum') }}
+          key: ubuntu-latest-1.25.4-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
-            ubuntu-latest-1.25-go-
+            ubuntu-latest-1.25.4-go-
 
       # Get the version from the tag
       - name: Get the version
