@@ -17,6 +17,8 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "^${{ matrix.golang-version }}"
+      - name: Verify Go version
+        run: go version && go env GOROOT && go env GOPATH
       - name: Clear Go module cache
         run: go clean -modcache || true
       - name: Cache Go modules
