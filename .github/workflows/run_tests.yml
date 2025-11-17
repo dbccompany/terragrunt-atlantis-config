@@ -6,7 +6,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
-        golang-version: ["1.25"]
+        golang-version: ["1.25.4"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -18,7 +18,7 @@ jobs:
       - name: Configure Go environment for Windows
         if: runner.os == 'Windows'
         run: |
-          echo "GOTOOLCHAIN=local" >> $GITHUB_ENV
+          echo "GOTOOLCHAIN=auto" >> $GITHUB_ENV
           echo "GOPROXY=https://proxy.golang.org,direct" >> $GITHUB_ENV
         shell: bash
       - name: Clear Go module cache
