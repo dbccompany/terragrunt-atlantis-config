@@ -37,15 +37,23 @@ jobs:
           CGO_ENABLED: 0
           GOFLAGS: -mod=readonly
         run: |
-          set -e
-          go test -v -cover -timeout 10m -count=1 -failfast ./... 2>&1 | tee test_output.log || {
-            echo "Tests failed or crashed. Checking for panics..."
-            if grep -q "panic:" test_output.log 2>/dev/null || grep -q "fatal error:" test_output.log 2>/dev/null; then
-              echo "::error::Test crash detected. Full output:"
-              cat test_output.log
+          set +e
+          go test -v -cover -timeout 10m -count=1 -parallel 4 ./... 2>&1 | tee test_output.log
+          TEST_EXIT_CODE=${PIPESTATUS[0]}
+          if [ $TEST_EXIT_CODE -ne 0 ]; then
+            echo "::error::Tests exited with code $TEST_EXIT_CODE"
+            if grep -q "panic:" test_output.log 2>/dev/null; then
+              echo "::error::Panic detected in tests:"
+              grep -A 20 "panic:" test_output.log || true
             fi
-            exit 1
-          }
+            if grep -q "fatal error:" test_output.log 2>/dev/null; then
+              echo "::error::Fatal error detected in tests:"
+              grep -A 20 "fatal error:" test_output.log || true
+            fi
+            echo "Full test output:"
+            cat test_output.log
+            exit $TEST_EXIT_CODE
+          fi
         continue-on-error: false
       - name: Upload test logs
         if: failure()
