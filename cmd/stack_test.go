@@ -316,34 +316,69 @@ stacks:
 }
 
 func TestStackManager_GenerateStackProject(t *testing.T) {
-	mgr := NewStackManager(StackManagerConfig{
-		GitRoot: "/repo",
+	t.Run("with CreateProjectName enabled", func(t *testing.T) {
+		mgr := NewStackManager(StackManagerConfig{
+			GitRoot:         "/repo",
+			CreateProjectName: true,
+		})
+
+		stack := Stack{
+			Name:         "test-stack",
+			Description:  "Test stack",
+			Modules:      []string{"app-a", "app-b"},
+			Dependencies: []string{"dependency-stack"},
+			AtlantisConfig: StackAtlantisConfig{
+				Workflow:          "test-workflow",
+				AutoPlan:          true,
+				Parallel:          true,
+				ApplyRequirements: []string{"approved"},
+				Workspace:         "test-workspace",
+			},
+			ExecutionOrder: 10,
+		}
+
+		project, err := mgr.GenerateStackProject(stack)
+		require.NoError(t, err)
+		assert.NotNil(t, project)
+		assert.Equal(t, "test-stack", project.Name)
+		assert.Equal(t, "test-workflow", project.Workflow)
+		assert.Equal(t, "test-workspace", project.Workspace)
+		assert.True(t, project.Autoplan.Enabled)
+		assert.Equal(t, 10, *project.ExecutionOrderGroup)
+		assert.Equal(t, []string{"dependency-stack"}, project.DependsOn)
 	})
 
-	stack := Stack{
-		Name:         "test-stack",
-		Description:  "Test stack",
-		Modules:      []string{"app-a", "app-b"},
-		Dependencies: []string{"dependency-stack"},
-		AtlantisConfig: StackAtlantisConfig{
-			Workflow:          "test-workflow",
-			AutoPlan:          true,
-			Parallel:          true,
-			ApplyRequirements: []string{"approved"},
-			Workspace:         "test-workspace",
-		},
-		ExecutionOrder: 10,
-	}
+	t.Run("with CreateProjectName disabled", func(t *testing.T) {
+		mgr := NewStackManager(StackManagerConfig{
+			GitRoot:         "/repo",
+			CreateProjectName: false,
+		})
 
-	project, err := mgr.GenerateStackProject(stack)
-	require.NoError(t, err)
-	assert.NotNil(t, project)
-	assert.Equal(t, "test-stack", project.Name)
-	assert.Equal(t, "test-workflow", project.Workflow)
-	assert.Equal(t, "test-workspace", project.Workspace)
-	assert.True(t, project.Autoplan.Enabled)
-	assert.Equal(t, 10, *project.ExecutionOrderGroup)
-	assert.Equal(t, []string{"dependency-stack"}, project.DependsOn)
+		stack := Stack{
+			Name:         "test-stack",
+			Description:  "Test stack",
+			Modules:      []string{"app-a", "app-b"},
+			Dependencies: []string{"dependency-stack"},
+			AtlantisConfig: StackAtlantisConfig{
+				Workflow:          "test-workflow",
+				AutoPlan:          true,
+				Parallel:          true,
+				ApplyRequirements: []string{"approved"},
+				Workspace:         "test-workspace",
+			},
+			ExecutionOrder: 10,
+		}
+
+		project, err := mgr.GenerateStackProject(stack)
+		require.NoError(t, err)
+		assert.NotNil(t, project)
+		assert.Empty(t, project.Name, "Name should be empty when CreateProjectName is false")
+		assert.Equal(t, "test-workflow", project.Workflow)
+		assert.Equal(t, "test-workspace", project.Workspace)
+		assert.True(t, project.Autoplan.Enabled)
+		assert.Equal(t, 10, *project.ExecutionOrderGroup)
+		assert.Equal(t, []string{"dependency-stack"}, project.DependsOn)
+	})
 }
 
 // Helper function

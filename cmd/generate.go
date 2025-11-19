@@ -871,9 +871,10 @@ func main(cmd *cobra.Command, args []string) error {
 	// Generate stack projects if enabled
 	if enableStacks {
 		stackMgr := NewStackManager(StackManagerConfig{
-			GitRoot:        gitRoot,
-			StackWorkflow:   stackWorkflow,
-			DefaultWorkflow: defaultWorkflow,
+			GitRoot:         gitRoot,
+			StackWorkflow:    stackWorkflow,
+			DefaultWorkflow:  defaultWorkflow,
+			CreateProjectName: createProjectName,
 		})
 
 		stacks, err := stackMgr.DiscoverStacks()

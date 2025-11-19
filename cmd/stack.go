@@ -84,6 +84,7 @@ type StackManagerConfig struct {
 	ValidateCoverage bool
 	StackWorkflow    string // Default workflow for stack projects
 	DefaultWorkflow   string // Fallback workflow if stack workflow not set
+	CreateProjectName bool  // Whether to include project name in generated config
 }
 
 // StackManager manages stack discovery and project generation
@@ -194,7 +195,6 @@ func (sm *StackManager) GenerateStackProject(stack Stack) (*AtlantisProject, err
 
 	project := &AtlantisProject{
 		Dir:              stackDir,
-		Name:             stack.Name,
 		Workflow:         workflow,
 		Workspace:        stack.AtlantisConfig.Workspace,
 		TerraformVersion: stack.AtlantisConfig.TerraformVersion,
@@ -202,6 +202,11 @@ func (sm *StackManager) GenerateStackProject(stack Stack) (*AtlantisProject, err
 			Enabled:      stack.AtlantisConfig.AutoPlan,
 			WhenModified: uniqueStrings(allDependencies),
 		},
+	}
+
+	// Only set Name if createProjectName flag is enabled (consistent with regular projects)
+	if sm.config.CreateProjectName {
+		project.Name = stack.Name
 	}
 
 	if len(stack.AtlantisConfig.ApplyRequirements) > 0 {
