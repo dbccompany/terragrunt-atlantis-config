@@ -42,13 +42,15 @@ jobs:
           echo "version=pr${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
 
       - name: Install make
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y make
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y make
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            choco install make -y || echo "Make may already be installed"
+          fi
 
       - name: Build binary
-        run: |
-          export VERSION="${{ steps.pr_info.outputs.version }}"
-          make build
+        run: make build
         env:
           VERSION: ${{ steps.pr_info.outputs.version }}
 
