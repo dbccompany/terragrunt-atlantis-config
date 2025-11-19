@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gruntwork-io/go-commons/errors"
 	"github.com/gruntwork-io/terragrunt/config"
@@ -151,13 +152,18 @@ func ConvertStackHclToStacks(definitions []StackHclDefinition, gitRoot string) [
 	stacks := []Stack{}
 
 	for _, def := range definitions {
-		// Determine stack name
-		stackName := def.FilePath
-		if def.StackBlock != nil {
+		// Determine stack name - prioritize stack block name, then directory name
+		var stackName string
+		if def.StackBlock != nil && def.StackBlock.Name != "" {
 			stackName = def.StackBlock.Name
-		} else if len(def.Units) > 0 {
-			// If no stack block, use directory name
-			stackName = filepath.Base(filepath.Dir(def.FilePath))
+		} else {
+			// If no stack block or empty name, use directory name where stack file is located
+			stackDir := filepath.Dir(def.FilePath)
+			stackName = filepath.Base(stackDir)
+			// If directory name is empty or ".", use parent directory
+			if stackName == "" || stackName == "." {
+				stackName = filepath.Base(filepath.Dir(stackDir))
+			}
 		}
 
 		// Collect unit paths - map units to actual terragrunt.hcl file locations
@@ -174,18 +180,33 @@ func ConvertStackHclToStacks(definitions []StackHclDefinition, gitRoot string) [
 				// Check if there's a terragrunt.hcl file at this path
 				terragruntFile := filepath.Join(unitPath, "terragrunt.hcl")
 				if _, err := os.Stat(terragruntFile); os.IsNotExist(err) {
-					// Maybe the path itself is the terragrunt.hcl file
-					if filepath.Base(unitPath) == "terragrunt.hcl" {
-						unitPath = filepath.Dir(unitPath)
-					} else {
-						// Path might point to directory containing terragrunt.hcl
-						// Try checking if unitPath is already a directory with terragrunt.hcl
-						log.Warnf("No terragrunt.hcl found at %s for unit %s", terragruntFile, unit.Name)
+					// Try using source if available to find the correct path
+					if unit.Source != nil {
+						// Source might contain the actual path - try to extract it
+						// Source format is often like "${get_terragrunt_dir()}/units/main"
+						sourceStr := *unit.Source
+						// Try to extract path from source (simple heuristic)
+						if strings.Contains(sourceStr, "/units/") {
+							parts := strings.Split(sourceStr, "/units/")
+							if len(parts) > 1 {
+								// Reconstruct path using units/ prefix
+								unitPath = filepath.Join(stackDir, "units", strings.TrimSuffix(parts[1], "\""))
+								terragruntFile = filepath.Join(unitPath, "terragrunt.hcl")
+							}
+						}
 					}
-				} else {
-					// Found terragrunt.hcl, use the directory path
-					unitPath = unitPath
+
+					// Check again after trying source-based path
+					if _, err := os.Stat(terragruntFile); os.IsNotExist(err) {
+						// Maybe the path itself is the terragrunt.hcl file
+						if filepath.Base(unitPath) == "terragrunt.hcl" {
+							unitPath = filepath.Dir(unitPath)
+						} else {
+							log.Warnf("No terragrunt.hcl found at %s for unit %s", terragruntFile, unit.Name)
+						}
+					}
 				}
+				// Found terragrunt.hcl or path is valid, use the directory path
 			} else if unit.Source != nil {
 				// If path is not specified but source is, we need to resolve the source
 				// For now, use source as-is (this may need Terragrunt function evaluation)
