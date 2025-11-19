@@ -642,6 +642,11 @@ func FindConfigFilesInPath(rootPath string, opts *options.TerragruntOptions) ([]
 			return err
 		}
 
+		// Skip .terragrunt-stack directories (temporary Terragrunt directories)
+		if info.IsDir() && (filepath.Base(path) == ".terragrunt-stack" || strings.Contains(path, "/.terragrunt-stack/") || strings.Contains(path, "\\.terragrunt-stack\\")) {
+			return filepath.SkipDir
+		}
+
 		if !info.IsDir() {
 			return nil
 		}
@@ -662,7 +667,13 @@ func FindConfigFilesInPath(rootPath string, opts *options.TerragruntOptions) ([]
 
 	nestedConfigFiles, err := config.FindConfigFilesInPath(rootPath, opts)
 	if err == nil {
-		configFiles = append(configFiles, nestedConfigFiles...)
+		// Filter out .terragrunt-stack directories
+		for _, nestedFile := range nestedConfigFiles {
+			// Skip files in .terragrunt-stack directories
+			if !strings.Contains(nestedFile, "/.terragrunt-stack/") && !strings.Contains(nestedFile, "\\.terragrunt-stack\\") {
+				configFiles = append(configFiles, nestedFile)
+			}
+		}
 	}
 	return configFiles, nil
 }
@@ -857,6 +868,70 @@ func main(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Generate stack projects if enabled
+	if enableStacks {
+		stackMgr := NewStackManager(StackManagerConfig{
+			GitRoot:        gitRoot,
+			StackWorkflow:   stackWorkflow,
+			DefaultWorkflow: defaultWorkflow,
+		})
+
+		stacks, err := stackMgr.DiscoverStacks()
+		if err != nil {
+			log.Warnf("Failed to discover stacks: %v", err)
+		} else if len(stacks) > 0 {
+			log.Infof("Discovered %d stack(s)", len(stacks))
+
+			// Get all terragrunt files to assign modules to stacks
+			allTerragruntFiles, err := getAllTerragruntFiles(gitRoot)
+			if err == nil {
+				// Convert to relative paths
+				modulePaths := []string{}
+				for _, tfPath := range allTerragruntFiles {
+					relPath, err := filepath.Rel(gitRoot, tfPath)
+					if err == nil {
+						modulePaths = append(modulePaths, filepath.ToSlash(relPath))
+					}
+				}
+
+				// Assign modules to stacks
+				_, err = stackMgr.AssignModulesToStacks(modulePaths)
+				if err != nil {
+					log.Warnf("Failed to assign modules to stacks: %v", err)
+				}
+
+				// Generate projects for each stack
+				for _, stack := range stacks {
+					stackProject, err := stackMgr.GenerateStackProject(stack)
+					if err != nil {
+						log.Warnf("Failed to generate project for stack %s: %v", stack.Name, err)
+						continue
+					}
+
+					if stackProject != nil {
+						// Check if project already exists (by Dir)
+						projectExists := false
+						if preserveProjects {
+							for i := range config.Projects {
+								if config.Projects[i].Dir == stackProject.Dir {
+									log.Infof("Updated stack project for %s", stackProject.Dir)
+									config.Projects[i] = *stackProject
+									projectExists = true
+									break
+								}
+							}
+						}
+
+						if !projectExists {
+							log.Infof("Created stack project for %s", stackProject.Dir)
+							config.Projects = append(config.Projects, *stackProject)
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Sort the projects in config by Dir
 	sort.Slice(config.Projects, func(i, j int) bool { return config.Projects[i].Dir < config.Projects[j].Dir })
 
@@ -967,6 +1042,8 @@ var createWorkspace bool
 var createProjectName bool
 var defaultTerraformVersion string
 var defaultWorkflow string
+var stackWorkflow string
+var enableStacks bool
 var filterPaths []string
 var outputPath string
 var preserveWorkflows bool
@@ -1028,6 +1105,8 @@ func init() {
 	generateCmd.PersistentFlags().BoolVar(&useProjectMarkers, "use-project-markers", false, "Creates Atlantis projects only for project hcl files with locals: atlantis_project = true")
 	generateCmd.PersistentFlags().BoolVar(&executionOrderGroups, "execution-order-groups", false, "Computes execution_order_groups for projects")
 	generateCmd.PersistentFlags().BoolVar(&dependsOn, "depends-on", false, "Computes depends_on for projects. Requires --create-project-name.")
+	generateCmd.PersistentFlags().BoolVar(&enableStacks, "enable-stacks", false, "Enable Terragrunt stack discovery and generation. Stacks are defined in terragrunt.stack.hcl files")
+	generateCmd.PersistentFlags().StringVar(&stackWorkflow, "stack-workflow", "", "Default workflow name for stack projects. If not set, uses the value from --workflow flag or stack configuration")
 }
 
 // Runs a set of arguments, returning the output
