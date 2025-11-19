@@ -46,6 +46,8 @@ func resetForRun() error {
 	useProjectMarkers = false
 	executionOrderGroups = false
 	dependsOn = false
+	enableStacks = false
+	stackWorkflow = ""
 
 	return nil
 }
