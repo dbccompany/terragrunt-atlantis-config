@@ -82,6 +82,8 @@ type StackManagerConfig struct {
 	AllowMultiStack  bool
 	StackMarkerFile  string
 	ValidateCoverage bool
+	StackWorkflow    string // Default workflow for stack projects
+	DefaultWorkflow   string // Fallback workflow if stack workflow not set
 }
 
 // StackManager manages stack discovery and project generation
@@ -182,10 +184,18 @@ func (sm *StackManager) GenerateStackProject(stack Stack) (*AtlantisProject, err
 	// This would typically be the common parent of all modules
 	stackDir := sm.findCommonParent(stack.Modules)
 
+	// Determine workflow: stack config > stack workflow flag > default workflow flag
+	workflow := stack.AtlantisConfig.Workflow
+	if workflow == "" && sm.config.StackWorkflow != "" {
+		workflow = sm.config.StackWorkflow
+	} else if workflow == "" && sm.config.DefaultWorkflow != "" {
+		workflow = sm.config.DefaultWorkflow
+	}
+
 	project := &AtlantisProject{
 		Dir:              stackDir,
 		Name:             stack.Name,
-		Workflow:         stack.AtlantisConfig.Workflow,
+		Workflow:         workflow,
 		Workspace:        stack.AtlantisConfig.Workspace,
 		TerraformVersion: stack.AtlantisConfig.TerraformVersion,
 		Autoplan: AutoplanConfig{
@@ -295,8 +305,72 @@ func (sm *StackManager) moduleMatchesStack(module string, stack Stack) bool {
 }
 
 func (sm *StackManager) findCommonParent(modules []string) string {
-	// TODO: Implement common parent directory finding
-	return "."
+	if len(modules) == 0 {
+		return "."
+	}
+
+	// Convert all module paths to absolute paths relative to gitRoot
+	absPaths := []string{}
+	for _, module := range modules {
+		absPath := filepath.Join(sm.config.GitRoot, module)
+		absPaths = append(absPaths, absPath)
+	}
+
+	// Find the common prefix
+	if len(absPaths) == 1 {
+		// Single module - return its directory
+		return filepath.ToSlash(filepath.Dir(modules[0]))
+	}
+
+	// Find common directory prefix
+	commonPrefix := absPaths[0]
+	for i := 1; i < len(absPaths); i++ {
+		commonPrefix = findCommonPath(commonPrefix, absPaths[i])
+		if commonPrefix == "" {
+			break
+		}
+	}
+
+	// Convert back to relative path from gitRoot
+	if commonPrefix != "" {
+		relPath, err := filepath.Rel(sm.config.GitRoot, commonPrefix)
+		if err == nil && relPath != "." {
+			return filepath.ToSlash(relPath)
+		}
+	}
+
+	// Fallback: use directory of first module
+	return filepath.ToSlash(filepath.Dir(modules[0]))
+}
+
+// findCommonPath finds the common directory path between two paths
+func findCommonPath(path1, path2 string) string {
+	dir1 := filepath.Dir(path1)
+	dir2 := filepath.Dir(path2)
+
+	// Walk up from the shorter path
+	parts1 := strings.Split(filepath.ToSlash(dir1), "/")
+	parts2 := strings.Split(filepath.ToSlash(dir2), "/")
+
+	minLen := len(parts1)
+	if len(parts2) < minLen {
+		minLen = len(parts2)
+	}
+
+	commonParts := []string{}
+	for i := 0; i < minLen; i++ {
+		if parts1[i] == parts2[i] {
+			commonParts = append(commonParts, parts1[i])
+		} else {
+			break
+		}
+	}
+
+	if len(commonParts) == 0 {
+		return ""
+	}
+
+	return strings.Join(commonParts, string(filepath.Separator))
 }
 
 // GetStackForModule returns the stack(s) a module belongs to
