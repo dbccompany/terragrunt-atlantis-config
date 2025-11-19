@@ -37,17 +37,18 @@ jobs:
       - name: Get PR number and commit SHA
         id: pr_info
         run: |
-          echo "pr_number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
-          echo "commit_sha=$(echo ${{ github.event.pull_request.head.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
-          echo "version=pr${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
+          PR_NUM="${{ github.event.pull_request.number }}"
+          COMMIT_SHA="${{ github.event.pull_request.head.sha }}"
+          SHORT_SHA=$(echo "$COMMIT_SHA" | cut -c1-7)
+          VERSION="pr${PR_NUM}-${SHORT_SHA}"
+          echo "pr_number=${PR_NUM}" >> $GITHUB_OUTPUT
+          echo "commit_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Version: ${VERSION}"
 
       - name: Install make
-        run: |
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            sudo apt-get update && sudo apt-get install -y make
-          elif [ "$RUNNER_OS" == "Windows" ]; then
-            choco install make -y || echo "Make may already be installed"
-          fi
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y make
 
       - name: Build binary
         run: make build
@@ -68,6 +69,18 @@ jobs:
           BUILD_DIR="build/${{ steps.pr_info.outputs.version }}"
           BINARY_NAME="terragrunt-atlantis-config_${{ steps.pr_info.outputs.version }}_${{ steps.os_arch.outputs.os }}_${{ steps.os_arch.outputs.arch }}"
           LATEST_NAME="terragrunt-atlantis-config_latest_${{ steps.os_arch.outputs.os }}_${{ steps.os_arch.outputs.arch }}"
+          
+          # Verify build directory and binary exist
+          if [ ! -d "$BUILD_DIR" ]; then
+            echo "Error: Build directory $BUILD_DIR does not exist"
+            exit 1
+          fi
+          
+          if [ ! -f "$BUILD_DIR/$BINARY_NAME" ]; then
+            echo "Error: Binary $BUILD_DIR/$BINARY_NAME does not exist"
+            ls -la "$BUILD_DIR/" || true
+            exit 1
+          fi
           
           # Copy binary with latest name
           cp "$BUILD_DIR/$BINARY_NAME" "$BUILD_DIR/$LATEST_NAME"
