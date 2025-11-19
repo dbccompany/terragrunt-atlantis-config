@@ -70,6 +70,7 @@ echo "Copied binary to Atlantis build context: ./${BINARY_NAME}"
 echo ""
 echo "=== Step 3: Building Docker image ==="
 docker build \
+    --no-cache \
     --build-arg TERRAGRUNT_ATLANTIS_CONFIG_BINARY="./${BINARY_NAME}" \
     -t "${DOCKER_IMAGE}:${DOCKER_TAG}" \
     -t "${DOCKER_IMAGE}:latest-stacks" \
@@ -77,8 +78,15 @@ docker build \
 
 echo ""
 echo "=== Step 4: Pushing Docker image ==="
-docker push "${DOCKER_IMAGE}:${DOCKER_TAG}"
-docker push "${DOCKER_IMAGE}:latest-stacks"
+if ! docker push "${DOCKER_IMAGE}:${DOCKER_TAG}"; then
+    echo "ERROR: Failed to push ${DOCKER_IMAGE}:${DOCKER_TAG}"
+    exit 1
+fi
+if ! docker push "${DOCKER_IMAGE}:latest-stacks"; then
+    echo "ERROR: Failed to push ${DOCKER_IMAGE}:latest-stacks"
+    exit 1
+fi
+echo "Successfully pushed both tags to DockerHub"
 
 echo ""
 echo "=== Cleanup ==="
