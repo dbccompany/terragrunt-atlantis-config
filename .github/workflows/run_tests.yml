@@ -24,5 +24,7 @@ jobs:
             ${{ matrix.os }}-${{ matrix.golang-version }}-go-
       - name: Download dependencies
         run: go mod download
-      - run: mkdir cmd/test_artifacts
-      - run: go test -v -cover ./...
+      - name: Create test artifacts directory
+        run: mkdir -p test_artifacts
+      - name: Run tests
+        run: go test -v -cover ./...

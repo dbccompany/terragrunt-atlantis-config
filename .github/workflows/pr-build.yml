@@ -47,7 +47,8 @@ jobs:
 
       - name: Build binary
         run: |
-          VERSION=${{ steps.pr_info.outputs.version }} make build
+          export VERSION="${{ steps.pr_info.outputs.version }}"
+          make build
         env:
           VERSION: ${{ steps.pr_info.outputs.version }}
 

@@ -1112,7 +1112,10 @@ func init() {
 // Runs a set of arguments, returning the output
 func RunWithFlags(filename string, args []string) ([]byte, error) {
 	rootCmd.SetArgs(args)
-	rootCmd.Execute()
+	err := rootCmd.Execute()
+	if err != nil {
+		return nil, err
+	}
 
 	return os.ReadFile(filename)
 }
