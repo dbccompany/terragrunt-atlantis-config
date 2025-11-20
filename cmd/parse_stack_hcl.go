@@ -239,7 +239,9 @@ func ConvertStackHclToStacks(definitions []StackHclDefinition, gitRoot string) [
 		}
 
 		// Convert stack file path to relative path from git root for Source field
-		stackSourceRelPath, err := filepath.Rel(gitRoot, def.FilePath)
+		// Clean gitRoot to remove trailing separator for Rel calculation
+		cleanGitRoot := filepath.Clean(gitRoot)
+		stackSourceRelPath, err := filepath.Rel(cleanGitRoot, def.FilePath)
 		if err != nil {
 			stackSourceRelPath = def.FilePath
 		}
