@@ -759,6 +759,7 @@ func main(cmd *cobra.Command, args []string) error {
 
 	// Initialize stack manager early if stacks are enabled (needed for filtering)
 	var stackMgr *StackManager
+	var discoveredStacks []Stack
 	if enableStacks {
 		stackMgr = NewStackManager(StackManagerConfig{
 			GitRoot:         gitRoot,
@@ -768,11 +769,12 @@ func main(cmd *cobra.Command, args []string) error {
 		})
 
 		// Discover stacks early so we can filter modules
-		stacks, err := stackMgr.DiscoverStacks()
+		var err error
+		discoveredStacks, err = stackMgr.DiscoverStacks()
 		if err != nil {
 			log.Warnf("Failed to discover stacks: %v", err)
-		} else if len(stacks) > 0 {
-			log.Infof("Discovered %d stack(s)", len(stacks))
+		} else if len(discoveredStacks) > 0 {
+			log.Infof("Discovered %d stack(s)", len(discoveredStacks))
 
 			// Get all terragrunt files to assign modules to stacks
 			allTerragruntFiles, err := getAllTerragruntFiles(gitRoot)
@@ -921,13 +923,9 @@ func main(cmd *cobra.Command, args []string) error {
 	}
 
 	// Generate stack projects if enabled
-	if enableStacks && stackMgr != nil {
-		stacks, err := stackMgr.DiscoverStacks()
-		if err != nil {
-			log.Warnf("Failed to discover stacks: %v", err)
-		} else if len(stacks) > 0 {
-			// Generate projects for each stack
-			for _, stack := range stacks {
+	if enableStacks && stackMgr != nil && len(discoveredStacks) > 0 {
+		// Generate projects for each stack (reuse stacks from earlier discovery)
+		for _, stack := range discoveredStacks {
 				stackProject, err := stackMgr.GenerateStackProject(stack)
 				if err != nil {
 					log.Warnf("Failed to generate project for stack %s: %v", stack.Name, err)

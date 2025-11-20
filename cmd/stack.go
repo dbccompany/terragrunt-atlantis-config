@@ -197,11 +197,14 @@ func (sm *StackManager) GenerateStackProject(stack Stack) (*AtlantisProject, err
 			if stackDir == "." || stackDir == "" {
 				stackDir = "."
 			}
+			log.Debugf("Stack %s: Using source directory %s (from Source: %s)", stack.Name, stackDir, stack.Source)
 		} else {
 			stackDir = "."
+			log.Debugf("Stack %s: No valid source, using '.'", stack.Name)
 		}
 	} else {
 		stackDir = sm.findCommonParent(stack.Modules)
+		log.Debugf("Stack %s: Using common parent %s (from %d modules)", stack.Name, stackDir, len(stack.Modules))
 	}
 
 	// Determine workflow: stack config > stack workflow flag > default workflow flag
