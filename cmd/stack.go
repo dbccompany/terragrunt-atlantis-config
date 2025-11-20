@@ -162,6 +162,8 @@ func (sm *StackManager) AssignModulesToStacks(modules []string) (map[string][]st
 }
 
 // GenerateStackProject generates an Atlantis project for a stack
+// Note: This uses stack.Modules which are the units defined in the stack file,
+// NOT the modules assigned via AssignModulesToStacks (which are in stackToModules)
 func (sm *StackManager) GenerateStackProject(stack Stack) (*AtlantisProject, error) {
 	// Aggregate all dependencies from modules in the stack
 	allDependencies := []string{
@@ -182,29 +184,37 @@ func (sm *StackManager) GenerateStackProject(stack Stack) (*AtlantisProject, err
 	}
 
 	// Determine the directory for the stack project
-	// This would typically be the common parent of all modules
-	// If no modules are found, use the stack source directory (where terragrunt.stack.hcl is located)
+	// Priority: Use stack source directory (where terragrunt.stack.hcl is located) if available
+	// Fallback: Use common parent of stack.Modules (units defined in stack file) if modules exist
 	var stackDir string
-	if len(stack.Modules) == 0 {
-		// No modules assigned - use stack source directory if available
-		// Stack.Source contains the relative path to the stack file from gitRoot
-		if stack.Source != "" && stack.Source != "external" {
-			// Extract directory from source file path (Source is already relative to gitRoot)
-			// Handle both forward slashes (already normalized) and OS-specific separators
-			normalizedSource := filepath.FromSlash(stack.Source) // Convert to OS-specific
-			stackDir = filepath.Dir(normalizedSource)            // Get directory
-			stackDir = filepath.ToSlash(stackDir)                // Convert back to forward slashes
-			if stackDir == "." || stackDir == "" {
+	
+	// Always prefer Source directory if available (most accurate)
+	if stack.Source != "" && stack.Source != "external" {
+		// Extract directory from source file path (Source is already relative to gitRoot)
+		// Handle both forward slashes (already normalized) and OS-specific separators
+		normalizedSource := filepath.FromSlash(stack.Source) // Convert to OS-specific
+		stackDir = filepath.Dir(normalizedSource)            // Get directory
+		stackDir = filepath.ToSlash(stackDir)                // Convert back to forward slashes
+		if stackDir == "." || stackDir == "" {
+			// If Source directory is ".", try using stack.Modules instead
+			if len(stack.Modules) > 0 {
+				stackDir = sm.findCommonParent(stack.Modules)
+				log.Infof("Stack %s: Source is '.', using common parent %s (from %d modules)", stack.Name, stackDir, len(stack.Modules))
+			} else {
 				stackDir = "."
+				log.Infof("Stack %s: Source is '.' and no modules, using '.'", stack.Name)
 			}
-			log.Debugf("Stack %s: Using source directory %s (from Source: %s)", stack.Name, stackDir, stack.Source)
 		} else {
-			stackDir = "."
-			log.Debugf("Stack %s: No valid source, using '.'", stack.Name)
+			log.Infof("Stack %s: Using source directory %s (from Source: %s, Modules count: %d)", stack.Name, stackDir, stack.Source, len(stack.Modules))
 		}
-	} else {
+	} else if len(stack.Modules) > 0 {
+		// No Source, but we have modules - use common parent
 		stackDir = sm.findCommonParent(stack.Modules)
-		log.Debugf("Stack %s: Using common parent %s (from %d modules)", stack.Name, stackDir, len(stack.Modules))
+		log.Infof("Stack %s: No Source, using common parent %s (from %d modules)", stack.Name, stackDir, len(stack.Modules))
+	} else {
+		// No Source and no modules - use current directory
+		stackDir = "."
+		log.Infof("Stack %s: No Source and no modules, using '.'", stack.Name)
 	}
 
 	// Determine workflow: stack config > stack workflow flag > default workflow flag
