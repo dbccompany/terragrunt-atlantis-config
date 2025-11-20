@@ -180,29 +180,37 @@ func ConvertStackHclToStacks(definitions []StackHclDefinition, gitRoot string) [
 				// Check if there's a terragrunt.hcl file at this path
 				terragruntFile := filepath.Join(unitPath, "terragrunt.hcl")
 				if _, err := os.Stat(terragruntFile); os.IsNotExist(err) {
-					// Try using source if available to find the correct path
-					if unit.Source != nil {
-						// Source might contain the actual path - try to extract it
-						// Source format is often like "${get_terragrunt_dir()}/units/main"
-						sourceStr := *unit.Source
-						// Try to extract path from source (simple heuristic)
-						if strings.Contains(sourceStr, "/units/") {
-							parts := strings.Split(sourceStr, "/units/")
-							if len(parts) > 1 {
-								// Reconstruct path using units/ prefix
-								unitPath = filepath.Join(stackDir, "units", strings.TrimSuffix(parts[1], "\""))
-								terragruntFile = filepath.Join(unitPath, "terragrunt.hcl")
+					// Try with units/ subdirectory (common pattern)
+					unitPathWithUnits := filepath.Join(stackDir, "units", *unit.Path)
+					terragruntFileWithUnits := filepath.Join(unitPathWithUnits, "terragrunt.hcl")
+					if _, err := os.Stat(terragruntFileWithUnits); err == nil {
+						unitPath = unitPathWithUnits
+						terragruntFile = terragruntFileWithUnits
+					} else {
+						// Try using source if available to find the correct path
+						if unit.Source != nil {
+							// Source might contain the actual path - try to extract it
+							// Source format is often like "${get_terragrunt_dir()}/units/main"
+							sourceStr := *unit.Source
+							// Try to extract path from source (simple heuristic)
+							if strings.Contains(sourceStr, "/units/") {
+								parts := strings.Split(sourceStr, "/units/")
+								if len(parts) > 1 {
+									// Reconstruct path using units/ prefix
+									unitPath = filepath.Join(stackDir, "units", strings.TrimSuffix(parts[1], "\""))
+									terragruntFile = filepath.Join(unitPath, "terragrunt.hcl")
+								}
 							}
 						}
-					}
 
-					// Check again after trying source-based path
-					if _, err := os.Stat(terragruntFile); os.IsNotExist(err) {
-						// Maybe the path itself is the terragrunt.hcl file
-						if filepath.Base(unitPath) == "terragrunt.hcl" {
-							unitPath = filepath.Dir(unitPath)
-						} else {
-							log.Warnf("No terragrunt.hcl found at %s for unit %s", terragruntFile, unit.Name)
+						// Check again after trying source-based path
+						if _, err := os.Stat(terragruntFile); os.IsNotExist(err) {
+							// Maybe the path itself is the terragrunt.hcl file
+							if filepath.Base(unitPath) == "terragrunt.hcl" {
+								unitPath = filepath.Dir(unitPath)
+							} else {
+								log.Warnf("No terragrunt.hcl found at %s for unit %s", terragruntFile, unit.Name)
+							}
 						}
 					}
 				}
@@ -230,12 +238,18 @@ func ConvertStackHclToStacks(definitions []StackHclDefinition, gitRoot string) [
 			description = *def.StackBlock.Description
 		}
 
+		// Convert stack file path to relative path from git root for Source field
+		stackSourceRelPath, err := filepath.Rel(gitRoot, def.FilePath)
+		if err != nil {
+			stackSourceRelPath = def.FilePath
+		}
+		
 		stack := Stack{
 			Name:           stackName,
 			Description:    description,
 			Modules:        unitPaths,
 			Dependencies:   []string{}, // TODO: Parse dependencies from stack blocks
-			Source:         "terragrunt.stack.hcl",
+			Source:         filepath.ToSlash(stackSourceRelPath),
 			AtlantisConfig: StackAtlantisConfig{
 				// Default values - could be extended to parse from locals or stack blocks
 			},

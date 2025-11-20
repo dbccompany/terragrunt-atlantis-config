@@ -757,6 +757,44 @@ func main(cmd *cobra.Command, args []string) error {
 	errGroup, _ := errgroup.WithContext(ctx)
 	sem := semaphore.NewWeighted(numExecutors)
 
+	// Initialize stack manager early if stacks are enabled (needed for filtering)
+	var stackMgr *StackManager
+	if enableStacks {
+		stackMgr = NewStackManager(StackManagerConfig{
+			GitRoot:         gitRoot,
+			StackWorkflow:    stackWorkflow,
+			DefaultWorkflow:  defaultWorkflow,
+			CreateProjectName: createProjectName,
+		})
+
+		// Discover stacks early so we can filter modules
+		stacks, err := stackMgr.DiscoverStacks()
+		if err != nil {
+			log.Warnf("Failed to discover stacks: %v", err)
+		} else if len(stacks) > 0 {
+			log.Infof("Discovered %d stack(s)", len(stacks))
+
+			// Get all terragrunt files to assign modules to stacks
+			allTerragruntFiles, err := getAllTerragruntFiles(gitRoot)
+			if err == nil {
+				// Convert to relative paths
+				modulePaths := []string{}
+				for _, tfPath := range allTerragruntFiles {
+					relPath, err := filepath.Rel(gitRoot, tfPath)
+					if err == nil {
+						modulePaths = append(modulePaths, filepath.ToSlash(relPath))
+					}
+				}
+
+				// Assign modules to stacks
+				_, err = stackMgr.AssignModulesToStacks(modulePaths)
+				if err != nil {
+					log.Warnf("Failed to assign modules to stacks: %v", err)
+				}
+			}
+		}
+	}
+
 	for _, workingDir := range workingDirs {
 		terragruntFiles, err := getAllTerragruntFiles(workingDir)
 		if err != nil {
@@ -778,6 +816,20 @@ func main(cmd *cobra.Command, args []string) error {
 						}
 					}
 				}
+				
+				// Skip modules that belong to stacks (they will be handled by stack projects)
+				if enableStacks && stackMgr != nil {
+					relPath, err := filepath.Rel(gitRoot, terragruntPath)
+					if err == nil {
+						relPath = filepath.ToSlash(relPath)
+						stacks := stackMgr.GetStackForModule(relPath)
+						if len(stacks) > 0 {
+							skipProject = true
+							log.Debugf("Skipping regular project for %s (belongs to stack(s): %v)", relPath, stacks)
+						}
+					}
+				}
+				
 				if skipProject {
 					continue
 				}
@@ -869,64 +921,36 @@ func main(cmd *cobra.Command, args []string) error {
 	}
 
 	// Generate stack projects if enabled
-	if enableStacks {
-		stackMgr := NewStackManager(StackManagerConfig{
-			GitRoot:         gitRoot,
-			StackWorkflow:    stackWorkflow,
-			DefaultWorkflow:  defaultWorkflow,
-			CreateProjectName: createProjectName,
-		})
-
+	if enableStacks && stackMgr != nil {
 		stacks, err := stackMgr.DiscoverStacks()
 		if err != nil {
 			log.Warnf("Failed to discover stacks: %v", err)
 		} else if len(stacks) > 0 {
-			log.Infof("Discovered %d stack(s)", len(stacks))
-
-			// Get all terragrunt files to assign modules to stacks
-			allTerragruntFiles, err := getAllTerragruntFiles(gitRoot)
-			if err == nil {
-				// Convert to relative paths
-				modulePaths := []string{}
-				for _, tfPath := range allTerragruntFiles {
-					relPath, err := filepath.Rel(gitRoot, tfPath)
-					if err == nil {
-						modulePaths = append(modulePaths, filepath.ToSlash(relPath))
-					}
-				}
-
-				// Assign modules to stacks
-				_, err = stackMgr.AssignModulesToStacks(modulePaths)
+			// Generate projects for each stack
+			for _, stack := range stacks {
+				stackProject, err := stackMgr.GenerateStackProject(stack)
 				if err != nil {
-					log.Warnf("Failed to assign modules to stacks: %v", err)
+					log.Warnf("Failed to generate project for stack %s: %v", stack.Name, err)
+					continue
 				}
 
-				// Generate projects for each stack
-				for _, stack := range stacks {
-					stackProject, err := stackMgr.GenerateStackProject(stack)
-					if err != nil {
-						log.Warnf("Failed to generate project for stack %s: %v", stack.Name, err)
-						continue
-					}
-
-					if stackProject != nil {
-						// Check if project already exists (by Dir)
-						projectExists := false
-						if preserveProjects {
-							for i := range config.Projects {
-								if config.Projects[i].Dir == stackProject.Dir {
-									log.Infof("Updated stack project for %s", stackProject.Dir)
-									config.Projects[i] = *stackProject
-									projectExists = true
-									break
-								}
+				if stackProject != nil {
+					// Check if project already exists (by Dir)
+					projectExists := false
+					if preserveProjects {
+						for i := range config.Projects {
+							if config.Projects[i].Dir == stackProject.Dir {
+								log.Infof("Updated stack project for %s", stackProject.Dir)
+								config.Projects[i] = *stackProject
+								projectExists = true
+								break
 							}
 						}
+					}
 
-						if !projectExists {
-							log.Infof("Created stack project for %s", stackProject.Dir)
-							config.Projects = append(config.Projects, *stackProject)
-						}
+					if !projectExists {
+						log.Infof("Created stack project for %s", stackProject.Dir)
+						config.Projects = append(config.Projects, *stackProject)
 					}
 				}
 			}
