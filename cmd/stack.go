@@ -190,7 +190,10 @@ func (sm *StackManager) GenerateStackProject(stack Stack) (*AtlantisProject, err
 		// Stack.Source contains the relative path to the stack file from gitRoot
 		if stack.Source != "" && stack.Source != "external" {
 			// Extract directory from source file path (Source is already relative to gitRoot)
-			stackDir = filepath.ToSlash(filepath.Dir(stack.Source))
+			// Handle both forward slashes (already normalized) and OS-specific separators
+			normalizedSource := filepath.FromSlash(stack.Source) // Convert to OS-specific
+			stackDir = filepath.Dir(normalizedSource)            // Get directory
+			stackDir = filepath.ToSlash(stackDir)                // Convert back to forward slashes
 			if stackDir == "." || stackDir == "" {
 				stackDir = "."
 			}
