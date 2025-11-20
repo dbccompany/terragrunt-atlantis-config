@@ -209,12 +209,25 @@ func ConvertStackHclToStacks(definitions []StackHclDefinition, gitRoot string) [
 							if filepath.Base(unitPath) == "terragrunt.hcl" {
 								unitPath = filepath.Dir(unitPath)
 							} else {
-								log.Warnf("No terragrunt.hcl found at %s for unit %s", terragruntFile, unit.Name)
+								log.Warnf("No terragrunt.hcl found at %s for unit %s, skipping", terragruntFile, unit.Name)
+								continue // Skip this unit - don't add invalid path
 							}
 						}
 					}
 				}
 				// Found terragrunt.hcl or path is valid, use the directory path
+				// Only add to unitPaths if the file actually exists
+				if _, err := os.Stat(filepath.Join(unitPath, "terragrunt.hcl")); err == nil {
+					// Convert to relative path from git root
+					relPath, err := filepath.Rel(gitRoot, unitPath)
+					if err != nil {
+						relPath = unitPath
+					}
+					unitPaths = append(unitPaths, filepath.ToSlash(relPath))
+				} else {
+					log.Warnf("Skipping unit %s - terragrunt.hcl not found at %s", unit.Name, unitPath)
+				}
+				continue // Move to next unit
 			} else if unit.Source != nil {
 				// If path is not specified but source is, we need to resolve the source
 				// For now, use source as-is (this may need Terragrunt function evaluation)
@@ -224,13 +237,6 @@ func ConvertStackHclToStacks(definitions []StackHclDefinition, gitRoot string) [
 				log.Warnf("Unit %s has no path or source, skipping", unit.Name)
 				continue
 			}
-
-			// Convert to relative path from git root
-			relPath, err := filepath.Rel(gitRoot, unitPath)
-			if err != nil {
-				relPath = unitPath
-			}
-			unitPaths = append(unitPaths, filepath.ToSlash(relPath))
 		}
 
 		description := ""
