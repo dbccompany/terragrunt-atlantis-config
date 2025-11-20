@@ -932,24 +932,23 @@ func main(cmd *cobra.Command, args []string) error {
 				continue
 			}
 
-				if stackProject != nil {
-					// Check if project already exists (by Dir)
-					projectExists := false
-					if preserveProjects {
-						for i := range config.Projects {
-							if config.Projects[i].Dir == stackProject.Dir {
-								log.Infof("Updated stack project for %s", stackProject.Dir)
-								config.Projects[i] = *stackProject
-								projectExists = true
-								break
-							}
+			if stackProject != nil {
+				// Check if project already exists (by Dir)
+				projectExists := false
+				if preserveProjects {
+					for i := range config.Projects {
+						if config.Projects[i].Dir == stackProject.Dir {
+							log.Infof("Updated stack project for %s", stackProject.Dir)
+							config.Projects[i] = *stackProject
+							projectExists = true
+							break
 						}
 					}
+				}
 
-					if !projectExists {
-						log.Infof("Created stack project for %s", stackProject.Dir)
-						config.Projects = append(config.Projects, *stackProject)
-					}
+				if !projectExists {
+					log.Infof("Created stack project for %s", stackProject.Dir)
+					config.Projects = append(config.Projects, *stackProject)
 				}
 			}
 		}
