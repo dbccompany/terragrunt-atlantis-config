@@ -197,7 +197,7 @@ func (sm *StackManager) GenerateStackProject(stack Stack) (*AtlantisProject, err
 			if stackDir == "." || stackDir == "" {
 				stackDir = "."
 			}
-			log.Infof("Stack %s: Using source directory %s (from Source: %s)", stack.Name, stackDir, stack.Source)
+			log.Debugf("Stack %s: Using source directory %s (from Source: %s)", stack.Name, stackDir, stack.Source)
 		} else {
 			stackDir = "."
 			log.Debugf("Stack %s: No valid source, using '.'", stack.Name)
