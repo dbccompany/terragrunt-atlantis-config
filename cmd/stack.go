@@ -187,15 +187,11 @@ func (sm *StackManager) GenerateStackProject(stack Stack) (*AtlantisProject, err
 	var stackDir string
 	if len(stack.Modules) == 0 {
 		// No modules assigned - use stack source directory if available
-		// Stack.Source contains the path to the stack file
+		// Stack.Source contains the relative path to the stack file from gitRoot
 		if stack.Source != "" && stack.Source != "external" {
-			// Extract directory from source file path
-			stackFileDir := filepath.Dir(stack.Source)
-			relPath, err := filepath.Rel(sm.config.GitRoot, stackFileDir)
-			if err == nil && relPath != "." {
-				stackDir = filepath.ToSlash(relPath)
-			} else {
-				// Fallback to a default if relative path calculation fails
+			// Extract directory from source file path (Source is already relative to gitRoot)
+			stackDir = filepath.ToSlash(filepath.Dir(stack.Source))
+			if stackDir == "." || stackDir == "" {
 				stackDir = "."
 			}
 		} else {
