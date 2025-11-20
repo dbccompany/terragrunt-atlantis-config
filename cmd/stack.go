@@ -314,23 +314,44 @@ func (sm *StackManager) findCommonParent(modules []string) string {
 		return "."
 	}
 
-	// Convert all module paths to absolute paths relative to gitRoot
-	absPaths := []string{}
+	// Convert all module paths to absolute directory paths relative to gitRoot
+	// Modules can be either file paths (e.g., path/to/terragrunt.hcl) or directory paths
+	absDirPaths := []string{}
 	for _, module := range modules {
-		absPath := filepath.Join(sm.config.GitRoot, module)
-		absPaths = append(absPaths, absPath)
+		var moduleDir string
+		// Check if module is a file path (ends with terragrunt.hcl) or directory path
+		if strings.HasSuffix(module, "terragrunt.hcl") || strings.HasSuffix(module, "terragrunt.hcl.json") {
+			// It's a file path, get its directory
+			moduleDir = filepath.Dir(module)
+		} else {
+			// It's already a directory path
+			moduleDir = module
+		}
+		
+		// Convert to absolute path and ensure it's a directory
+		absPath := filepath.Join(sm.config.GitRoot, moduleDir)
+		absDirPaths = append(absDirPaths, absPath)
 	}
 
 	// Find the common prefix
-	if len(absPaths) == 1 {
-		// Single module - return its directory
-		return filepath.ToSlash(filepath.Dir(modules[0]))
+	if len(absDirPaths) == 1 {
+		// Single module - return its directory relative to gitRoot
+		moduleDir := absDirPaths[0]
+		relPath, err := filepath.Rel(sm.config.GitRoot, moduleDir)
+		if err == nil && relPath != "." {
+			return filepath.ToSlash(relPath)
+		}
+		// Fallback: use the module path as-is (already relative)
+		if strings.HasSuffix(modules[0], "terragrunt.hcl") || strings.HasSuffix(modules[0], "terragrunt.hcl.json") {
+			return filepath.ToSlash(filepath.Dir(modules[0]))
+		}
+		return filepath.ToSlash(modules[0])
 	}
 
 	// Find common directory prefix
-	commonPrefix := absPaths[0]
-	for i := 1; i < len(absPaths); i++ {
-		commonPrefix = findCommonPath(commonPrefix, absPaths[i])
+	commonPrefix := absDirPaths[0]
+	for i := 1; i < len(absDirPaths); i++ {
+		commonPrefix = findCommonPath(commonPrefix, absDirPaths[i])
 		if commonPrefix == "" {
 			break
 		}
@@ -344,8 +365,18 @@ func (sm *StackManager) findCommonParent(modules []string) string {
 		}
 	}
 
-	// Fallback: use directory of first module
-	return filepath.ToSlash(filepath.Dir(modules[0]))
+	// Fallback: use directory of first module relative to gitRoot
+	var moduleDir string
+	if strings.HasSuffix(modules[0], "terragrunt.hcl") || strings.HasSuffix(modules[0], "terragrunt.hcl.json") {
+		moduleDir = filepath.Dir(modules[0])
+	} else {
+		moduleDir = modules[0]
+	}
+	relPath, err := filepath.Rel(sm.config.GitRoot, filepath.Join(sm.config.GitRoot, moduleDir))
+	if err == nil && relPath != "." {
+		return filepath.ToSlash(relPath)
+	}
+	return filepath.ToSlash(moduleDir)
 }
 
 // findCommonPath finds the common directory path between two paths
