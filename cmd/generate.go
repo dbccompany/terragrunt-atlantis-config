@@ -926,11 +926,11 @@ func main(cmd *cobra.Command, args []string) error {
 	if enableStacks && stackMgr != nil && len(discoveredStacks) > 0 {
 		// Generate projects for each stack (reuse stacks from earlier discovery)
 		for _, stack := range discoveredStacks {
-				stackProject, err := stackMgr.GenerateStackProject(stack)
-				if err != nil {
-					log.Warnf("Failed to generate project for stack %s: %v", stack.Name, err)
-					continue
-				}
+			stackProject, err := stackMgr.GenerateStackProject(stack)
+			if err != nil {
+				log.Warnf("Failed to generate project for stack %s: %v", stack.Name, err)
+				continue
+			}
 
 				if stackProject != nil {
 					// Check if project already exists (by Dir)
