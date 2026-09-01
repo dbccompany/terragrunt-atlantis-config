@@ -836,6 +836,9 @@ func main(cmd *cobra.Command, args []string) error {
 						if len(stacks) > 0 {
 							skipProject = true
 							log.Debugf("Skipping regular project for %s (belongs to stack(s): %v)", relPath, stacks)
+						} else if stackMgr.IsStackSourceDir(relPath) {
+							skipProject = true
+							log.Debugf("Skipping regular project for %s (unit source catalog of a stack)", relPath)
 						}
 					}
 				}

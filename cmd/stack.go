@@ -37,6 +37,12 @@ type Stack struct {
 	Include []string
 	Exclude []string
 
+	// Absolute paths (slash-separated, may include glob suffixes) that should
+	// additionally trigger the stack project when modified. Filled in from
+	// the units' include chains, external dependency blocks, local terraform
+	// module sources and cascaded dependencies of external targets.
+	ExtraWatchPaths []string
+
 	// Stack dependencies (other stack names)
 	Dependencies []string
 
@@ -246,6 +252,22 @@ func (sm *StackManager) GenerateStackProject(stack Stack) (*AtlantisProject, err
 			relSlash+"/**/*.tf*")
 	}
 
+	// Additional watch targets collected from the unit configs themselves:
+	// include chains, external dependencies (incl. cascaded) and local
+	// terraform module sources. Entries are absolute and may carry globs.
+	for _, watchPath := range stack.ExtraWatchPaths {
+		rel, err := filepath.Rel(absStackDir, filepath.FromSlash(watchPath))
+		if err != nil {
+			continue
+		}
+		relSlash := filepath.ToSlash(rel)
+		if relSlash == "." || !strings.HasPrefix(relSlash, "..") {
+			// inside the stack directory, already covered
+			continue
+		}
+		relativeDependencies = append(relativeDependencies, relSlash)
+	}
+
 	// Determine workflow: stack config > stack workflow flag > default workflow flag
 	workflow := stack.AtlantisConfig.Workflow
 	if workflow == "" && sm.config.StackWorkflow != "" {
@@ -338,8 +360,12 @@ func (sm *StackManager) loadStackHclFiles() ([]Stack, error) {
 		stackDefinitions = append(stackDefinitions, *def)
 	}
 
-	// Convert to internal Stack structs
+	// Convert to internal Stack structs and enrich with unit-level detail
+	// (include chains, external dependencies, terraform module sources)
 	stacks := ConvertStackHclToStacks(stackDefinitions, sm.config.GitRoot)
+	for i := range stacks {
+		EnrichStackWithUnitDetails(&stacks[i], stackDefinitions[i], sm.config.GitRoot)
+	}
 	log.Infof("Discovered %d stack(s) from %d terragrunt.stack.hcl file(s)", len(stacks), len(stackFiles))
 
 	return stacks, nil
@@ -423,4 +449,20 @@ func (sm *StackManager) findCommonParent(modules []string) string {
 // absolute or relative to gitRoot.
 func (sm *StackManager) GetStackForModule(module string) []string {
 	return sm.moduleToStacks[sm.normalizeModuleDir(module)]
+}
+
+// IsStackSourceDir reports whether the module dir is a directory used as a
+// local `source` by some stack's units (a catalog/template directory). Such
+// directories are watched by the stack project but do not get individual
+// Atlantis projects. Only consulted with --enable-stacks.
+func (sm *StackManager) IsStackSourceDir(module string) bool {
+	dir := sm.normalizeModuleDir(module)
+	for _, stack := range sm.stacks {
+		for _, source := range stack.UnitSources {
+			if dir == source || strings.HasPrefix(dir, source+"/") {
+				return true
+			}
+		}
+	}
+	return false
 }

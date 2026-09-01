@@ -17,22 +17,4 @@ projects:
   name: live_prod
   workflow: terragrunt-stack
   workspace: live_prod
-- autoplan:
-    enabled: true
-    when_modified:
-    - '*.hcl'
-    - '*.tf*'
-    - ../vpc/terragrunt.hcl
-    - ../vpc/*.tf*
-  dir: units/app
-  name: units_app
-  workspace: units_app
-- autoplan:
-    enabled: true
-    when_modified:
-    - '*.hcl'
-    - '*.tf*'
-  dir: units/vpc
-  name: units_vpc
-  workspace: units_vpc
 version: 3

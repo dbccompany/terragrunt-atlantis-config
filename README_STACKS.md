@@ -79,9 +79,19 @@ Semantics:
   (e.g. `live_prod`).
 - **Members vs. sources**: if a unit's `path` resolves to a directory that already contains a
   `terragrunt.hcl` in the repo, that directory is a stack *member* and gets no individual project.
-  Directories referenced through a unit's local `source` (catalogs like `units/vpc`) are only
-  watched via `when_modified` and still receive regular projects, exactly as they would without
-  stacks enabled.
+  Directories referenced through a unit's local `source` (catalogs like `units/vpc`) are treated
+  as templates: they are watched via `when_modified` but get no Atlantis project of their own
+  (planning a template directory in-place would be meaningless).
+- **Dependency tracking**: each unit's config is evaluated anchored at the unit's *generated*
+  location (as if `terragrunt stack generate` had already run). From it:
+  - `include` chains (e.g. `find_in_parent_folders` of shared root env/account files) are
+    watched;
+  - `dependency` blocks pointing at sibling units inside the same stack are ignored (terragrunt
+    orders them during `stack run`); dependencies outside the stack are watched, and — with
+    `--cascade-dependencies` (default) — their own dependencies are followed transitively, the
+    same way regular projects behave. This also feeds correct `execution_order_group` values
+    when combined with `--execution-order-groups`;
+  - local `terraform { source = ... }` directories of unit configs are watched.
 - **Remote sources** (git refs, registry addresses) cannot be watched and are skipped.
 - **Nested `stack` blocks** contribute their local `source` directories to `when_modified`.
 - **Parsing is tolerant**: the file is first decoded with a full Terragrunt evaluation context
@@ -154,8 +164,9 @@ workflows:
 
 - One Atlantis project per stack; per-unit granularity via generated `.terragrunt-stack`
   directories is deliberately not produced (those directories do not exist on a fresh clone).
-- Dependencies *between* HCL-defined stacks are not inferred from unit `dependency` blocks; use
-  the definition file for explicit `depends_on`.
+- Explicit `depends_on` between stack projects requires the definition file.
+- `locals { extra_atlantis_dependencies = ... }` inside unit configs are not yet collected
+  (upstream feature parity todo).
 
 ## Tests
 

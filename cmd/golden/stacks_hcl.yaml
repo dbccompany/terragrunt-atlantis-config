@@ -14,18 +14,4 @@ projects:
     - ../../units/app/**/*.hcl
     - ../../units/app/**/*.tf*
   dir: live/prod
-- autoplan:
-    enabled: false
-    when_modified:
-    - '*.hcl'
-    - '*.tf*'
-    - ../vpc/terragrunt.hcl
-    - ../vpc/*.tf*
-  dir: units/app
-- autoplan:
-    enabled: false
-    when_modified:
-    - '*.hcl'
-    - '*.tf*'
-  dir: units/vpc
 version: 3

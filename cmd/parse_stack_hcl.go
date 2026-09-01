@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,10 +10,12 @@ import (
 	"github.com/gruntwork-io/go-commons/errors"
 	"github.com/gruntwork-io/terragrunt/config"
 	"github.com/gruntwork-io/terragrunt/config/hclparse"
+	"github.com/gruntwork-io/terragrunt/options"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
 	log "github.com/sirupsen/logrus"
 	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/function"
 )
 
 // UnitBlock represents a unit block in terragrunt.stack.hcl
@@ -52,6 +55,148 @@ type StackHclDefinition struct {
 	Units    []UnitBlock
 	// Stacks are the nested stack blocks declared inside the file.
 	Stacks []StackBlock
+}
+
+// anchoredUnitWatchPaths collects paths discovered while parsing a unit config
+type anchoredUnitWatchPaths struct {
+	includes []string // absolute file paths of the include chain
+	deps     []string // absolute dirs referenced by dependency blocks
+	tfDirs   []string // absolute dirs of local terraform module sources
+}
+
+// parseAnchoredUnitConfig reads sourceFile (a unit's terragrunt.hcl) but
+// evaluates it as if it lived at anchorFile — the unit's generated location
+// inside the stack — matching Terragrunt's runtime semantics after
+// `terragrunt stack generate`. Include blocks are followed recursively with
+// the same anchor (Terragrunt merges included config into the child).
+//
+// Attributes are evaluated one by one: evaluation uses a full Terragrunt
+// context, but functions that depend on the config file's location existing
+// on disk (get_repo_root, get_path_from_repo_root) are overridden with
+// values derived from gitRoot — the anchor does not exist before
+// `terragrunt stack generate` runs. Attributes that still fail to evaluate
+// fall back to literal strings or are skipped.
+func parseAnchoredUnitConfig(sourceFile, anchorFile, gitRoot string, seen map[string]bool, out *anchoredUnitWatchPaths) {
+	if seen[sourceFile] {
+		return
+	}
+	seen[sourceFile] = true
+
+	configString, err := os.ReadFile(sourceFile)
+	if err != nil {
+		log.Debugf("Stack unit config %s not readable: %v", sourceFile, err)
+		return
+	}
+
+	parser := hclparse.NewParser()
+	file, err := parseHclForStack(parser, string(configString), sourceFile)
+	if err != nil {
+		log.Debugf("Failed to parse stack unit config %s: %v", sourceFile, err)
+		return
+	}
+
+	anchorDir := filepath.Dir(anchorFile)
+	cleanGitRoot := filepath.Clean(gitRoot)
+
+	// Build the anchored Terragrunt evaluation context
+	var evalContext *hcl.EvalContext
+	terragruntOptions, optsErr := options.NewTerragruntOptionsWithConfigPath(anchorFile)
+	if optsErr == nil {
+		terragruntOptions.OriginalTerragruntConfigPath = anchorFile
+		terragruntOptions.Env = getEnvs()
+		ctx := config.NewParsingContext(context.Background(), terragruntOptions)
+		evalContext, err = createTerragruntEvalContext(ctx, anchorFile)
+		if err != nil {
+			log.Debugf("Failed to create eval context for %s: %v", sourceFile, err)
+			evalContext = nil
+		} else {
+			staticStringFunc := func(value string) function.Function {
+				return function.New(&function.Spec{
+					Params: []function.Parameter{},
+					Type:   function.StaticReturnType(cty.String),
+					Impl:   func(args []cty.Value, retType cty.Type) (cty.Value, error) { return cty.StringVal(value), nil },
+				})
+			}
+			// These functions exec git inside the config's directory, which does
+			// not exist yet for generated units — pin them to known values
+			if _, ok := evalContext.Functions["get_repo_root"]; ok {
+				evalContext.Functions["get_repo_root"] = staticStringFunc(cleanGitRoot)
+			}
+			if _, ok := evalContext.Functions["get_path_from_repo_root"]; ok {
+				anchorRel, relErr := filepath.Rel(cleanGitRoot, anchorDir)
+				if relErr == nil {
+					evalContext.Functions["get_path_from_repo_root"] = staticStringFunc(filepath.ToSlash(anchorRel))
+				}
+			}
+		}
+	}
+
+	evalStringAttr := func(body hcl.Body, attrName string) *string {
+		attrs, diags := body.JustAttributes()
+		if diags != nil && diags.HasErrors() {
+			return nil
+		}
+		attr, ok := attrs[attrName]
+		if !ok {
+			return nil
+		}
+		if evalContext != nil {
+			if val, diags := attr.Expr.Value(evalContext); !diags.HasErrors() && val.Type() == cty.String {
+				s := val.AsString()
+				return &s
+			}
+		}
+		// Literal fallback
+		if val, diags := attr.Expr.Value(nil); !diags.HasErrors() && val.Type() == cty.String {
+			s := val.AsString()
+			return &s
+		}
+		return nil
+	}
+
+	schema := &hcl.BodySchema{
+		Blocks: []hcl.BlockHeaderSchema{
+			{Type: "include", LabelNames: []string{"name"}},
+			{Type: "dependency", LabelNames: []string{"name"}},
+			{Type: "terraform"},
+		},
+	}
+	content, _, diags := file.Body.PartialContent(schema)
+	if diags != nil && diags.HasErrors() {
+		log.Debugf("Failed to decode blocks of stack unit config %s: %v", sourceFile, diags)
+		return
+	}
+
+	resolve := func(p string) string {
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(anchorDir, p)
+		}
+		return filepath.Clean(p)
+	}
+
+	for _, block := range content.Blocks {
+		switch block.Type {
+		case "include":
+			if path := evalStringAttr(block.Body, "path"); path != nil {
+				includeFile := resolve(*path)
+				if _, err := os.Stat(includeFile); err == nil {
+					out.includes = append(out.includes, includeFile)
+					parseAnchoredUnitConfig(includeFile, anchorFile, gitRoot, seen, out)
+				}
+			}
+		case "dependency":
+			if configPath := evalStringAttr(block.Body, "config_path"); configPath != nil {
+				out.deps = append(out.deps, resolve(*configPath))
+			}
+		case "terraform":
+			if source := evalStringAttr(block.Body, "source"); source != nil {
+				sourceDir := resolve(*source)
+				if info, err := os.Stat(sourceDir); err == nil && info.IsDir() {
+					out.tfDirs = append(out.tfDirs, sourceDir)
+				}
+			}
+		}
+	}
 }
 
 // ParseStackHclFile reads and parses a terragrunt.stack.hcl file.
@@ -338,4 +483,110 @@ func ConvertStackHclToStacks(definitions []StackHclDefinition, gitRoot string) [
 	}
 
 	return stacks
+}
+
+// EnrichStackWithUnitDetails inspects the units of a stack and fills in
+// ExtraWatchPaths so the stack project tracks exactly what the units would
+// track if they were standalone projects:
+//
+//   - the include chain of every unit config (evaluated from the unit's
+//     generated location, matching `terragrunt stack run` semantics)
+//   - dependency blocks: dependencies on sibling units of the same stack are
+//     skipped (terragrunt orders them within the stack run); dependencies
+//     pointing elsewhere are recorded, and — with cascade enabled — their
+//     own dependencies are recorded too
+//   - local terraform module sources referenced by unit configs
+func EnrichStackWithUnitDetails(stack *Stack, def StackHclDefinition, gitRoot string) {
+	stackDir := filepath.Dir(def.FilePath)
+
+	// Generated (or existing) directories of the stack's own units
+	unitDirs := map[string]bool{}
+	for _, unit := range def.Units {
+		if unit.Path != nil {
+			unitDirs[filepath.Clean(filepath.Join(stackDir, *unit.Path))] = true
+		}
+	}
+
+	extra := []string{}
+	addUnique := func(entry string) {
+		entry = filepath.ToSlash(entry)
+		for _, e := range extra {
+			if e == entry {
+				return
+			}
+		}
+		extra = append(extra, entry)
+	}
+
+	for _, unit := range def.Units {
+		if unit.Path == nil {
+			continue
+		}
+		unitDir := filepath.Clean(filepath.Join(stackDir, *unit.Path))
+		anchorFile := filepath.Join(unitDir, "terragrunt.hcl")
+
+		// The config file to read: the live unit dir if it exists,
+		// otherwise the unit's source directory (catalog).
+		configFile := anchorFile
+		if _, err := os.Stat(configFile); err != nil {
+			if unit.Source == nil {
+				continue
+			}
+			sourceDir := *unit.Source
+			if !filepath.IsAbs(sourceDir) {
+				sourceDir = filepath.Join(stackDir, sourceDir)
+			}
+			configFile = filepath.Join(sourceDir, "terragrunt.hcl")
+			if _, err := os.Stat(configFile); err != nil {
+				continue
+			}
+		}
+
+		paths := anchoredUnitWatchPaths{}
+		parseAnchoredUnitConfig(filepath.Clean(configFile), anchorFile, gitRoot, map[string]bool{}, &paths)
+
+		for _, includeFile := range paths.includes {
+			addUnique(includeFile)
+		}
+		for _, tfDir := range paths.tfDirs {
+			addUnique(filepath.Join(tfDir, "*.tf*"))
+		}
+
+		for _, depDir := range paths.deps {
+			depDir = filepath.Clean(depDir)
+			if unitDirs[depDir] {
+				// internal to the stack; ordered by terragrunt stack run
+				continue
+			}
+			depFile := filepath.Join(depDir, "terragrunt.hcl")
+			addUnique(depFile)
+
+			// Cascade through the dependency's own dependencies so
+			// transitive changes propagate, mirroring regular projects
+			if !cascadeDependencies {
+				continue
+			}
+			if _, err := os.Stat(depFile); err != nil {
+				continue
+			}
+			depOpts, err := options.NewTerragruntOptionsWithConfigPath(depFile)
+			if err != nil {
+				continue
+			}
+			depOpts.Env = getEnvs()
+			depCtx := config.NewParsingContext(context.Background(), depOpts)
+			cascaded, err := getDependencies(depCtx, depFile)
+			if err != nil {
+				log.Debugf("Failed to cascade stack dependency %s: %v", depFile, err)
+				continue
+			}
+			for _, cascadedDep := range cascaded {
+				if filepath.IsAbs(cascadedDep) {
+					addUnique(cascadedDep)
+				}
+			}
+		}
+	}
+
+	stack.ExtraWatchPaths = extra
 }

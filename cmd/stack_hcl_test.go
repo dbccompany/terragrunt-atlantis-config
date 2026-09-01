@@ -243,3 +243,129 @@ func TestFindStackHclFiles_SkipsGeneratedDirs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{filepath.Join(tmpDir, "live", "prod", "terragrunt.stack.hcl")}, stackFiles)
 }
+
+// TestParseAnchoredUnitConfig verifies that a unit config is evaluated as if
+// located at its generated (anchor) location: includes resolve against the
+// anchor's parent directories, dependency blocks anchor at the anchor dir,
+// and local terraform module sources are collected. The anchor does not
+// exist on disk — exactly like before `terragrunt stack generate`.
+func TestParseAnchoredUnitConfig(t *testing.T) {
+	root := t.TempDir()
+
+	// Layout:
+	//   root/stack/cloud.hcl                      <- include via find_in_parent_folders from anchor
+	//   root/stack/prod/                          <- stack dir (units generate here)
+	//   root/catalog/peering/terragrunt.hcl       <- the unit source we read
+	//   root/modules/routing/main.tf              <- local module source of the unit
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "stack", "prod"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "stack", "cloud.hcl"), []byte("locals {}"), 0644))
+	catalogDir := filepath.Join(root, "catalog", "peering")
+	require.NoError(t, os.MkdirAll(catalogDir, 0755))
+	moduleDir := filepath.Join(root, "modules", "routing")
+	require.NoError(t, os.MkdirAll(moduleDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(moduleDir, "main.tf"), []byte(""), 0644))
+
+	unitConfig := `include "cloud" {
+  path = find_in_parent_folders("cloud.hcl")
+}
+
+dependency "vpc" {
+  config_path = "../main"
+}
+
+dependency "other" {
+  config_path = "../../outside/resolver"
+}
+
+locals {}
+
+terraform {
+  source = "${get_repo_root()}/modules/routing"
+}
+`
+	sourceFile := filepath.Join(catalogDir, "terragrunt.hcl")
+	require.NoError(t, os.WriteFile(sourceFile, []byte(unitConfig), 0644))
+
+	anchorFile := filepath.Join(root, "stack", "prod", "peering", "terragrunt.hcl")
+	paths := anchoredUnitWatchPaths{}
+	parseAnchoredUnitConfig(sourceFile, anchorFile, root, map[string]bool{}, &paths)
+
+	assert.Equal(t, []string{filepath.Join(root, "stack", "cloud.hcl")}, paths.includes)
+	assert.Contains(t, paths.deps, filepath.Join(root, "stack", "prod", "main"))
+	assert.Contains(t, paths.deps, filepath.Join(root, "stack", "outside", "resolver"))
+	assert.Equal(t, []string{moduleDir}, paths.tfDirs)
+}
+
+// TestEnrichStackWithUnitDetails checks external dependency classification,
+// cascading and catalog-source exclusion inputs.
+func TestEnrichStackWithUnitDetails(t *testing.T) {
+	root := t.TempDir()
+
+	// Layout:
+	//   cloud.hcl                              <- include file, ancestor of the stack dir
+	//   stack/prod/terragrunt.stack.hcl        <- the stack (units generate inline)
+	//   stack/catalog/worker/terragrunt.hcl    <- unit source (catalog)
+	//   shared/terragrunt.hcl                  <- external dependency (regular module)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "cloud.hcl"), []byte("locals {}"), 0644))
+
+	stackDir := filepath.Join(root, "stack", "prod")
+	require.NoError(t, os.MkdirAll(stackDir, 0755))
+	stackFile := filepath.Join(stackDir, "terragrunt.stack.hcl")
+	require.NoError(t, os.WriteFile(stackFile, []byte(`unit "worker" {
+  source = "../catalog/worker"
+  path   = "worker"
+}
+`), 0644))
+
+	catalogDir := filepath.Join(root, "stack", "catalog", "worker")
+	require.NoError(t, os.MkdirAll(catalogDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(catalogDir, "terragrunt.hcl"), []byte(`include "cloud" {
+  path = find_in_parent_folders("cloud.hcl")
+}
+
+dependency "shared" {
+  config_path = "../../../shared"
+}
+`), 0644))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "shared"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "shared", "terragrunt.hcl"), []byte(`terraform { source = "." }`), 0644))
+
+	terragruntOptions := options.NewTerragruntOptions()
+	ctx := config.NewParsingContext(context.Background(), terragruntOptions)
+	def, err := ParseStackHclFile(stackFile, ctx)
+	require.NoError(t, err)
+
+	stacks := ConvertStackHclToStacks([]StackHclDefinition{*def}, root)
+	require.Equal(t, 1, len(stacks))
+	stack := stacks[0]
+
+	// catalog dir is a watched unit source
+	assert.Equal(t, []string{"stack/catalog/worker"}, stack.UnitSources)
+
+	oldCascade := cascadeDependencies
+	cascadeDependencies = true
+	defer func() { cascadeDependencies = oldCascade }()
+
+	EnrichStackWithUnitDetails(&stack, *def, root)
+
+	assert.Contains(t, stack.ExtraWatchPaths, filepath.Join(root, "cloud.hcl"))
+	// external dependency is recorded (and cascaded: shared's *.tf* pattern)
+	assert.Contains(t, stack.ExtraWatchPaths, filepath.Join(root, "shared", "terragrunt.hcl"))
+	assert.Contains(t, stack.ExtraWatchPaths, filepath.Join(root, "shared", "*.tf*"))
+}
+
+// TestStackManager_IsStackSourceDir verifies catalog dirs are excluded from
+// regular project generation.
+func TestStackManager_IsStackSourceDir(t *testing.T) {
+	mgr := NewStackManager(StackManagerConfig{GitRoot: "/repo"})
+	mgr.stacks = []Stack{
+		{Name: "live/prod", UnitSources: []string{"units/vpc", "units/app"}},
+	}
+
+	assert.True(t, mgr.IsStackSourceDir("units/vpc"))
+	assert.True(t, mgr.IsStackSourceDir("units/vpc/terragrunt.hcl"))
+	assert.True(t, mgr.IsStackSourceDir("units/vpc/submodule"))
+	assert.False(t, mgr.IsStackSourceDir("units/db"))
+	assert.False(t, mgr.IsStackSourceDir("live/prod"))
+}
