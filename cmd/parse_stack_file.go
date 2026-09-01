@@ -86,12 +86,15 @@ func ConvertExternalStacksToStacks(externalStacks []ExternalStackConfig, gitRoot
 			Name:         extStack.Name,
 			Description:  extStack.Description,
 			Modules:      extStack.Modules,
+			Include:      extStack.Include,
+			Exclude:      extStack.Exclude,
 			Dependencies: extStack.DependsOn,
-			Source:       "external-file",
+			// No on-disk stack file: the project directory is derived from
+			// the common parent of the stack's member modules.
+			Source: "",
 			AtlantisConfig: StackAtlantisConfig{
 				Workflow:          extStack.Atlantis.Workflow,
 				AutoPlan:          extStack.Atlantis.AutoPlan,
-				Parallel:          extStack.Atlantis.Parallel,
 				ApplyRequirements: extStack.Atlantis.ApplyRequirements,
 				Workspace:         extStack.Atlantis.Workspace,
 				TerraformVersion:  extStack.Atlantis.TerraformVersion,
@@ -173,7 +176,7 @@ func matchGlobPattern(path, pattern string) bool {
 			prefix := strings.TrimSuffix(parts[0], "/")
 			suffix := strings.TrimPrefix(parts[1], "/")
 
-			if prefix != "" && !strings.HasPrefix(path, prefix) {
+			if prefix != "" && path != prefix && !strings.HasPrefix(path, prefix+"/") {
 				return false
 			}
 			if suffix != "" && !strings.HasSuffix(path, suffix) {
@@ -191,89 +194,4 @@ func matchGlobPattern(path, pattern string) bool {
 	}
 
 	return matched
-}
-
-// FindStackDependencies resolves dependencies between stacks
-func FindStackDependencies(stacks []Stack, projectMap map[string][]string) map[string][]string {
-	stackDeps := make(map[string][]string)
-
-	for _, stack := range stacks {
-		deps := []string{}
-
-		// Add explicitly declared dependencies
-		deps = append(deps, stack.Dependencies...)
-
-		// Add implicit dependencies based on module dependencies
-		// (This would require analyzing Terragrunt dependencies)
-		// TODO: Implement implicit dependency detection
-
-		stackDeps[stack.Name] = uniqueStrings(deps)
-	}
-
-	return stackDeps
-}
-
-// GenerateStackDefinitionTemplate generates a template stack definition file
-func GenerateStackDefinitionTemplate(outputPath string) error {
-	template := `version: 1
-stacks:
-  # Example environment-based stack
-  - name: production-environment
-    description: Complete production infrastructure
-    
-    # Use glob patterns to include modules
-    include:
-      - "environments/production/**"
-    
-    # Optionally exclude specific paths
-    exclude:
-      - "environments/production/experimental/**"
-    
-    # Stack dependencies
-    depends_on:
-      - shared-services
-    
-    # Atlantis configuration
-    atlantis:
-      workflow: production
-      autoplan: true
-      parallel: true
-      apply_requirements:
-        - approved
-        - mergeable
-      execution_order_group: 10
-  
-  # Example service-based stack
-  - name: auth-service
-    description: Authentication service infrastructure
-    
-    # Or specify explicit module paths
-    modules:
-      - services/auth/api
-      - services/auth/database
-      - services/auth/cache
-    
-    atlantis:
-      workflow: service
-      autoplan: true
-      execution_order_group: 20
-
-  # Example shared infrastructure stack
-  - name: shared-services
-    include:
-      - "shared/**"
-    atlantis:
-      workflow: shared
-      autoplan: false
-      apply_requirements:
-        - approved
-      execution_order_group: 1
-`
-
-	if err := os.WriteFile(outputPath, []byte(template), 0644); err != nil {
-		return fmt.Errorf("failed to write template file: %w", err)
-	}
-
-	log.Infof("Generated stack definition template at %s", outputPath)
-	return nil
 }

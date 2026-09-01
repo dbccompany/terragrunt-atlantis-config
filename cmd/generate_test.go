@@ -48,6 +48,7 @@ func resetForRun() error {
 	dependsOn = false
 	enableStacks = false
 	stackWorkflow = ""
+	stackDefinitionFile = ""
 
 	return nil
 }
@@ -694,5 +695,80 @@ func TestOpenTofuProviderSyntax(t *testing.T) {
 	runTest(t, filepath.Join("golden", "opentofu_provider_syntax.yaml"), []string{
 		"--root",
 		filepath.Join("..", "test_examples", "opentofu_provider_syntax"),
+	})
+}
+
+func TestStacksHclExample(t *testing.T) {
+	runTest(t, filepath.Join("golden", "stacks_hcl.yaml"), []string{
+		"--root",
+		filepath.Join("..", "test_examples", "stacks_hcl_example"),
+		"--enable-stacks",
+	})
+}
+
+func TestStacksHclExampleWithAllFlags(t *testing.T) {
+	runTest(t, filepath.Join("golden", "stacks_hcl_all_flags.yaml"), []string{
+		"--root",
+		filepath.Join("..", "test_examples", "stacks_hcl_example"),
+		"--enable-stacks",
+		"--autoplan",
+		"--create-project-name",
+		"--create-workspace",
+		"--stack-workflow",
+		"terragrunt-stack",
+	})
+}
+
+// Terragrunt stack files must be ignored when stacks support is disabled
+func TestStacksHclExampleWithoutStacksFlag(t *testing.T) {
+	runTest(t, filepath.Join("golden", "stacks_hcl_disabled.yaml"), []string{
+		"--root",
+		filepath.Join("..", "test_examples", "stacks_hcl_example"),
+	})
+}
+
+func TestStacksLocalUnits(t *testing.T) {
+	runTest(t, filepath.Join("golden", "stacks_local_units.yaml"), []string{
+		"--root",
+		filepath.Join("..", "test_examples", "stacks_local_units"),
+		"--enable-stacks",
+	})
+}
+
+// Stack member units must get regular projects when stacks support is disabled
+func TestStacksLocalUnitsWithoutStacksFlag(t *testing.T) {
+	runTest(t, filepath.Join("golden", "stacks_local_units_disabled.yaml"), []string{
+		"--root",
+		filepath.Join("..", "test_examples", "stacks_local_units"),
+	})
+}
+
+func TestStacksBasicFromDefinitionFile(t *testing.T) {
+	runTest(t, filepath.Join("golden", "stacks_basic.yaml"), []string{
+		"--root",
+		filepath.Join("..", "test_examples", "stacks_basic"),
+		"--enable-stacks",
+		"--stack-definition-file",
+		"atlantis-stacks.yaml",
+		"--create-project-name",
+	})
+}
+
+// The definition file must not be picked up when stacks support is disabled
+func TestStacksBasicDefinitionFileIgnoredWithoutStacksFlag(t *testing.T) {
+	runTest(t, filepath.Join("golden", "stacks_basic_disabled.yaml"), []string{
+		"--root",
+		filepath.Join("..", "test_examples", "stacks_basic"),
+	})
+}
+
+func TestStacksWithPatterns(t *testing.T) {
+	runTest(t, filepath.Join("golden", "stacks_patterns.yaml"), []string{
+		"--root",
+		filepath.Join("..", "test_examples", "stacks_with_patterns"),
+		"--enable-stacks",
+		"--stack-definition-file",
+		"atlantis-stacks.yaml",
+		"--create-project-name",
 	})
 }

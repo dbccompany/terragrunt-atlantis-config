@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -13,14 +14,28 @@ import (
 
 // Stack represents a logical grouping of Terragrunt modules
 type Stack struct {
-	// Unique name for the stack
+	// Unique name for the stack. For stacks discovered from
+	// terragrunt.stack.hcl files, this is the stack file's directory
+	// relative to the repo root. For stacks from a definition file,
+	// this is the explicitly declared name.
 	Name string
 
 	// Optional description
 	Description string
 
-	// List of module paths belonging to this stack
+	// Directories (relative to gitRoot) containing a terragrunt.hcl that
+	// belong to this stack. These do not get individual Atlantis projects.
 	Modules []string
+
+	// Directories (relative to gitRoot) referenced by unit/nested-stack
+	// `source` attributes. They only feed the stack project's autoplan
+	// when_modified patterns and still get normal projects of their own.
+	UnitSources []string
+
+	// Glob patterns (relative to gitRoot) used to assign modules to this
+	// stack. Only populated for stacks from an external definition file.
+	Include []string
+	Exclude []string
 
 	// Stack dependencies (other stack names)
 	Dependencies []string
@@ -31,7 +46,8 @@ type Stack struct {
 	// Execution order for this stack
 	ExecutionOrder int
 
-	// Source of stack definition (for debugging)
+	// Path of the terragrunt.stack.hcl file that defined this stack,
+	// relative to gitRoot. Empty for stacks from an external definition file.
 	Source string
 }
 
@@ -39,7 +55,6 @@ type Stack struct {
 type StackAtlantisConfig struct {
 	Workflow          string
 	AutoPlan          bool
-	Parallel          bool
 	ApplyRequirements []string
 	Workspace         string
 	TerraformVersion  string
@@ -66,7 +81,6 @@ type ExternalStackConfig struct {
 type AtlantisStackConfig struct {
 	Workflow            string   `yaml:"workflow,omitempty" json:"workflow,omitempty"`
 	AutoPlan            bool     `yaml:"autoplan" json:"autoplan"`
-	Parallel            bool     `yaml:"parallel" json:"parallel"`
 	ApplyRequirements   []string `yaml:"apply_requirements,omitempty" json:"apply_requirements,omitempty"`
 	ExecutionOrderGroup int      `yaml:"execution_order_group,omitempty" json:"execution_order_group,omitempty"`
 	Workspace           string   `yaml:"workspace,omitempty" json:"workspace,omitempty"`
@@ -75,16 +89,14 @@ type AtlantisStackConfig struct {
 
 // StackManagerConfig configures the stack manager
 type StackManagerConfig struct {
-	GitRoot          string
-	DefinitionFile   string
-	InferFromDir     bool
-	DirectoryDepth   int
-	AllowMultiStack  bool
-	StackMarkerFile  string
-	ValidateCoverage bool
-	StackWorkflow    string // Default workflow for stack projects
-	DefaultWorkflow   string // Fallback workflow if stack workflow not set
-	CreateProjectName bool  // Whether to include project name in generated config
+	GitRoot                 string
+	DefinitionFile          string
+	StackWorkflow           string // Default workflow for stack projects
+	DefaultWorkflow         string // Fallback workflow if stack workflow not set
+	CreateProjectName       bool   // Whether to include project name in generated config
+	CreateWorkspace         bool   // Whether to generate a workspace per project
+	AutoPlan                bool   // Global autoplan default, used when a stack does not set one
+	DefaultTerraformVersion string
 }
 
 // StackManager manages stack discovery and project generation
@@ -107,20 +119,19 @@ func NewStackManager(config StackManagerConfig) *StackManager {
 
 // DiscoverStacks discovers all stacks from configured sources
 // Priority order:
-// 1. HCL stack files (terragrunt.stack.hcl) - Primary method per Terragrunt official docs
-// 2. External definition file (YAML/JSON) - Legacy/alternative method
-// 3. Directory inference - Future implementation
+// 1. HCL stack files (terragrunt.stack.hcl) - the native Terragrunt stacks feature
+// 2. External definition file (YAML/JSON) - alternative, explicitly configured method
 func (sm *StackManager) DiscoverStacks() ([]Stack, error) {
 	var discoveredStacks []Stack
 
-	// Source 1: HCL stack files (terragrunt.stack.hcl) - PRIMARY METHOD
+	// Source 1: HCL stack files (terragrunt.stack.hcl)
 	stacks, err := sm.loadStackHclFiles()
 	if err != nil {
 		return nil, err
 	}
 	discoveredStacks = append(discoveredStacks, stacks...)
 
-	// Source 2: External definition file (YAML/JSON) - LEGACY/ALTERNATIVE
+	// Source 2: External definition file (YAML/JSON)
 	if sm.config.DefinitionFile != "" {
 		stacks, err := sm.loadStackDefinitionFile()
 		if err != nil {
@@ -129,19 +140,27 @@ func (sm *StackManager) DiscoverStacks() ([]Stack, error) {
 		discoveredStacks = append(discoveredStacks, stacks...)
 	}
 
-	// Source 3: Directory inference
-	if sm.config.InferFromDir {
-		stacks, err := sm.inferStacksFromDirectory()
-		if err != nil {
-			return nil, err
-		}
-		discoveredStacks = append(discoveredStacks, stacks...)
-	}
-
-	// TODO: Source 4: Module-level tags
-
 	sm.stacks = discoveredStacks
 	return discoveredStacks, nil
+}
+
+// normalizeModuleDir converts a terragrunt module reference (which may be an
+// absolute path, a path to a terragrunt.hcl file, or a directory) into a
+// slash-separated directory path relative to gitRoot.
+func (sm *StackManager) normalizeModuleDir(module string) string {
+	dir := module
+	if filepath.IsAbs(dir) {
+		if rel, err := filepath.Rel(sm.config.GitRoot, dir); err == nil {
+			dir = rel
+		}
+	}
+	dir = filepath.ToSlash(dir)
+	base := path.Base(dir)
+	if base == "terragrunt.hcl" || base == "terragrunt.hcl.json" {
+		dir = path.Dir(dir)
+	}
+	dir = strings.TrimSuffix(dir, "/")
+	return dir
 }
 
 // AssignModulesToStacks assigns terragrunt modules to stacks
@@ -150,9 +169,10 @@ func (sm *StackManager) AssignModulesToStacks(modules []string) (map[string][]st
 
 	for _, stack := range sm.stacks {
 		for _, module := range modules {
-			if sm.moduleMatchesStack(module, stack) {
-				assignments[stack.Name] = append(assignments[stack.Name], module)
-				sm.moduleToStacks[module] = append(sm.moduleToStacks[module], stack.Name)
+			moduleDir := sm.normalizeModuleDir(module)
+			if sm.moduleMatchesStack(moduleDir, stack) {
+				assignments[stack.Name] = append(assignments[stack.Name], moduleDir)
+				sm.moduleToStacks[moduleDir] = append(sm.moduleToStacks[moduleDir], stack.Name)
 			}
 		}
 	}
@@ -162,59 +182,68 @@ func (sm *StackManager) AssignModulesToStacks(modules []string) (map[string][]st
 }
 
 // GenerateStackProject generates an Atlantis project for a stack
-// Note: This uses stack.Modules which are the units defined in the stack file,
-// NOT the modules assigned via AssignModulesToStacks (which are in stackToModules)
 func (sm *StackManager) GenerateStackProject(stack Stack) (*AtlantisProject, error) {
-	// Aggregate all dependencies from modules in the stack
-	allDependencies := []string{
+	// Determine the directory for the stack project.
+	// - HCL-defined stacks: the directory containing terragrunt.stack.hcl.
+	//   A workflow for such a project is expected to run Terragrunt stack
+	//   commands there (e.g. `terragrunt stack generate` + `stack run`).
+	// - Externally defined stacks: the common parent directory of the
+	//   stack's member modules (including modules matched via
+	//   include/exclude patterns during assignment).
+	memberDirs := append([]string{}, stack.Modules...)
+	memberDirs = append(memberDirs, sm.stackToModules[stack.Name]...)
+
+	var stackDir string
+	if stack.Source != "" {
+		stackDir = filepath.ToSlash(filepath.Dir(filepath.FromSlash(stack.Source)))
+		if stackDir == "" {
+			stackDir = "."
+		}
+	} else if len(memberDirs) > 0 {
+		stackDir = sm.findCommonParent(memberDirs)
+	} else {
+		stackDir = "."
+	}
+
+	// autoplan when_modified patterns. The base patterns cover everything
+	// inside the stack directory; directories watched by this stack that
+	// live outside of it (e.g. a shared units catalog) are added as
+	// relative patterns.
+	watchedDirs := append([]string{}, memberDirs...)
+	watchedDirs = append(watchedDirs, stack.UnitSources...)
+	for _, depName := range stack.Dependencies {
+		for _, s := range sm.stacks {
+			if s.Name == depName {
+				watchedDirs = append(watchedDirs, s.Modules...)
+				watchedDirs = append(watchedDirs, sm.stackToModules[s.Name]...)
+				watchedDirs = append(watchedDirs, s.UnitSources...)
+			}
+		}
+	}
+
+	cleanGitRoot := filepath.Clean(sm.config.GitRoot)
+	absStackDir := filepath.Join(cleanGitRoot, filepath.FromSlash(stackDir))
+
+	relativeDependencies := []string{
 		"*.hcl",
 		"*.tf*",
 		"**/*.hcl",
 		"**/*.tf*",
 	}
-
-	// Add stack-level dependencies
-	for _, depStack := range stack.Dependencies {
-		if modules, ok := sm.stackToModules[depStack]; ok {
-			for _, module := range modules {
-				// Convert to relative path from stack root
-				allDependencies = append(allDependencies, module)
-			}
+	for _, dir := range watchedDirs {
+		absDir := filepath.Join(cleanGitRoot, filepath.FromSlash(dir))
+		rel, err := filepath.Rel(absStackDir, absDir)
+		if err != nil || rel == "." || rel == "" {
+			continue
 		}
-	}
-
-	// Determine the directory for the stack project
-	// Priority: Use stack source directory (where terragrunt.stack.hcl is located) if available
-	// Fallback: Use common parent of stack.Modules (units defined in stack file) if modules exist
-	var stackDir string
-	
-	// Always prefer Source directory if available (most accurate)
-	if stack.Source != "" && stack.Source != "external" {
-		// Extract directory from source file path (Source is already relative to gitRoot)
-		// Handle both forward slashes (already normalized) and OS-specific separators
-		normalizedSource := filepath.FromSlash(stack.Source) // Convert to OS-specific
-		stackDir = filepath.Dir(normalizedSource)            // Get directory
-		stackDir = filepath.ToSlash(stackDir)                // Convert back to forward slashes
-		if stackDir == "." || stackDir == "" {
-			// If Source directory is ".", try using stack.Modules instead
-			if len(stack.Modules) > 0 {
-				stackDir = sm.findCommonParent(stack.Modules)
-				log.Infof("Stack %s: Source is '.', using common parent %s (from %d modules)", stack.Name, stackDir, len(stack.Modules))
-			} else {
-				stackDir = "."
-				log.Infof("Stack %s: Source is '.' and no modules, using '.'", stack.Name)
-			}
-		} else {
-			log.Infof("Stack %s: Using source directory %s (from Source: %s, Modules count: %d)", stack.Name, stackDir, stack.Source, len(stack.Modules))
+		relSlash := filepath.ToSlash(rel)
+		if !strings.HasPrefix(relSlash, "..") {
+			// inside the stack directory, already covered by ** patterns
+			continue
 		}
-	} else if len(stack.Modules) > 0 {
-		// No Source, but we have modules - use common parent
-		stackDir = sm.findCommonParent(stack.Modules)
-		log.Infof("Stack %s: No Source, using common parent %s (from %d modules)", stack.Name, stackDir, len(stack.Modules))
-	} else {
-		// No Source and no modules - use current directory
-		stackDir = "."
-		log.Infof("Stack %s: No Source and no modules, using '.'", stack.Name)
+		relativeDependencies = append(relativeDependencies,
+			relSlash+"/**/*.hcl",
+			relSlash+"/**/*.tf*")
 	}
 
 	// Determine workflow: stack config > stack workflow flag > default workflow flag
@@ -225,21 +254,38 @@ func (sm *StackManager) GenerateStackProject(stack Stack) (*AtlantisProject, err
 		workflow = sm.config.DefaultWorkflow
 	}
 
+	// Autoplan: explicit stack setting wins, otherwise follow the global flag
+	autoPlanEnabled := stack.AtlantisConfig.AutoPlan || sm.config.AutoPlan
+
+	terraformVersion := stack.AtlantisConfig.TerraformVersion
+	if terraformVersion == "" {
+		terraformVersion = sm.config.DefaultTerraformVersion
+	}
+
+	// Sanitized name used for the project name and workspace (same rules as
+	// for regular projects)
+	projectName := projectNameRegex.ReplaceAllString(stack.Name, "_")
+
 	project := &AtlantisProject{
 		Dir:              stackDir,
 		Workflow:         workflow,
-		Workspace:        stack.AtlantisConfig.Workspace,
-		TerraformVersion: stack.AtlantisConfig.TerraformVersion,
+		TerraformVersion: terraformVersion,
 		Autoplan: AutoplanConfig{
-			Enabled:      stack.AtlantisConfig.AutoPlan,
-			WhenModified: uniqueStrings(allDependencies),
+			Enabled:      autoPlanEnabled,
+			WhenModified: uniqueStrings(relativeDependencies),
 		},
 	}
 
 	// Only set Name if createProjectName flag is enabled (consistent with regular projects)
 	if sm.config.CreateProjectName {
-		project.Name = stack.Name
+		project.Name = projectName
 	}
+
+	workspace := stack.AtlantisConfig.Workspace
+	if workspace == "" && sm.config.CreateWorkspace {
+		workspace = projectName
+	}
+	project.Workspace = workspace
 
 	if len(stack.AtlantisConfig.ApplyRequirements) > 0 {
 		project.ApplyRequirements = &stack.AtlantisConfig.ApplyRequirements
@@ -249,9 +295,14 @@ func (sm *StackManager) GenerateStackProject(stack Stack) (*AtlantisProject, err
 		project.ExecutionOrderGroup = &stack.ExecutionOrder
 	}
 
-	// Generate depends_on if there are stack dependencies
-	if len(stack.Dependencies) > 0 {
-		project.DependsOn = stack.Dependencies
+	// depends_on references project names, which only exist when project
+	// names are generated
+	if len(stack.Dependencies) > 0 && sm.config.CreateProjectName {
+		dependsOn := make([]string, 0, len(stack.Dependencies))
+		for _, dep := range stack.Dependencies {
+			dependsOn = append(dependsOn, projectNameRegex.ReplaceAllString(dep, "_"))
+		}
+		project.DependsOn = dependsOn
 	}
 
 	return project, nil
@@ -273,7 +324,6 @@ func (sm *StackManager) loadStackHclFiles() ([]Stack, error) {
 	}
 
 	// Create parsing context - use empty options for now
-	// TODO: Pass actual terragrunt options if available
 	terragruntOptions := options.NewTerragruntOptions()
 	ctx := config.NewParsingContext(context.Background(), terragruntOptions)
 
@@ -296,7 +346,7 @@ func (sm *StackManager) loadStackHclFiles() ([]Stack, error) {
 }
 
 func (sm *StackManager) loadStackDefinitionFile() ([]Stack, error) {
-	// Parse the stack definition file (YAML/JSON - legacy method)
+	// Parse the stack definition file (YAML/JSON)
 	stackDef, err := ParseStackDefinitionFile(sm.config.DefinitionFile)
 	if err != nil {
 		return nil, err
@@ -307,147 +357,70 @@ func (sm *StackManager) loadStackDefinitionFile() ([]Stack, error) {
 	return stacks, nil
 }
 
-func (sm *StackManager) inferStacksFromDirectory() ([]Stack, error) {
-	// TODO: Implement directory-based inference
-	return []Stack{}, nil
-}
-
-func (sm *StackManager) moduleMatchesStack(module string, stack Stack) bool {
-	// Convert stack to ExternalStackConfig format for matching
-	extStack := ExternalStackConfig{
-		Name:    stack.Name,
-		Include: []string{}, // Will be populated if needed
-		Exclude: []string{},
-		Modules: stack.Modules,
-	}
-
-	// Use the MatchModuleToStacks function to check if module matches
-	// We need to normalize the module path relative to gitRoot
-	relModule, err := filepath.Rel(sm.config.GitRoot, module)
-	if err != nil {
-		// If relative path calculation fails, use absolute path
-		relModule = module
-	}
-	relModule = filepath.ToSlash(relModule)
-
-	// Check explicit module list
-	for _, explicitModule := range extStack.Modules {
-		explicitModule = filepath.ToSlash(explicitModule)
-		if strings.HasSuffix(relModule, explicitModule) || relModule == explicitModule {
+func (sm *StackManager) moduleMatchesStack(moduleDir string, stack Stack) bool {
+	// Check explicit member list. A member directory matches itself and
+	// anything nested underneath it.
+	for _, member := range stack.Modules {
+		member = sm.normalizeModuleDir(member)
+		if moduleDir == member || strings.HasPrefix(moduleDir, member+"/") {
 			return true
 		}
 	}
 
-	return false
+	// Check include/exclude patterns (external definition files)
+	if len(stack.Include) == 0 && len(stack.Exclude) == 0 {
+		return false
+	}
+
+	included := len(stack.Include) == 0
+	for _, pattern := range stack.Include {
+		if matchGlobPattern(moduleDir, filepath.ToSlash(pattern)) {
+			included = true
+			break
+		}
+	}
+	if !included {
+		return false
+	}
+
+	for _, pattern := range stack.Exclude {
+		if matchGlobPattern(moduleDir, filepath.ToSlash(pattern)) {
+			return false
+		}
+	}
+
+	return true
 }
 
+// findCommonParent returns the common parent directory (relative to gitRoot)
+// of the given module paths. Returns "." when there is no common subdirectory.
 func (sm *StackManager) findCommonParent(modules []string) string {
 	if len(modules) == 0 {
 		return "."
 	}
 
-	// Convert all module paths to absolute directory paths relative to gitRoot
-	// Modules can be either file paths (e.g., path/to/terragrunt.hcl) or directory paths
-	absDirPaths := []string{}
-	for _, module := range modules {
-		var moduleDir string
-		// Check if module is a file path (ends with terragrunt.hcl) or directory path
-		if strings.HasSuffix(module, "terragrunt.hcl") || strings.HasSuffix(module, "terragrunt.hcl.json") {
-			// It's a file path, get its directory
-			moduleDir = filepath.Dir(module)
-		} else {
-			// It's already a directory path
-			moduleDir = module
+	common := strings.Split(sm.normalizeModuleDir(modules[0]), "/")
+	for _, module := range modules[1:] {
+		parts := strings.Split(sm.normalizeModuleDir(module), "/")
+		i := 0
+		for i < len(common) && i < len(parts) && common[i] == parts[i] {
+			i++
 		}
-		
-		// Convert to absolute path and ensure it's a directory
-		absPath := filepath.Join(sm.config.GitRoot, moduleDir)
-		absDirPaths = append(absDirPaths, absPath)
-	}
-
-	// Find the common prefix
-	if len(absDirPaths) == 1 {
-		// Single module - return its directory relative to gitRoot
-		moduleDir := absDirPaths[0]
-		relPath, err := filepath.Rel(sm.config.GitRoot, moduleDir)
-		if err == nil && relPath != "." {
-			return filepath.ToSlash(relPath)
-		}
-		// Fallback: use the module path as-is (already relative)
-		if strings.HasSuffix(modules[0], "terragrunt.hcl") || strings.HasSuffix(modules[0], "terragrunt.hcl.json") {
-			return filepath.ToSlash(filepath.Dir(modules[0]))
-		}
-		return filepath.ToSlash(modules[0])
-	}
-
-	// Find common directory prefix
-	commonPrefix := absDirPaths[0]
-	for i := 1; i < len(absDirPaths); i++ {
-		commonPrefix = findCommonPath(commonPrefix, absDirPaths[i])
-		if commonPrefix == "" {
-			break
+		common = common[:i]
+		if len(common) == 0 {
+			return "."
 		}
 	}
 
-	// Convert back to relative path from gitRoot
-	if commonPrefix != "" {
-		relPath, err := filepath.Rel(sm.config.GitRoot, commonPrefix)
-		if err == nil && relPath != "." {
-			return filepath.ToSlash(relPath)
-		}
+	if len(common) == 0 || common[0] == "." {
+		return "."
 	}
-
-	// Fallback: use directory of first module relative to gitRoot
-	var moduleDir string
-	if strings.HasSuffix(modules[0], "terragrunt.hcl") || strings.HasSuffix(modules[0], "terragrunt.hcl.json") {
-		moduleDir = filepath.Dir(modules[0])
-	} else {
-		moduleDir = modules[0]
-	}
-	relPath, err := filepath.Rel(sm.config.GitRoot, filepath.Join(sm.config.GitRoot, moduleDir))
-	if err == nil && relPath != "." {
-		return filepath.ToSlash(relPath)
-	}
-	return filepath.ToSlash(moduleDir)
+	return strings.Join(common, "/")
 }
 
-// findCommonPath finds the common directory path between two paths
-func findCommonPath(path1, path2 string) string {
-	dir1 := filepath.Dir(path1)
-	dir2 := filepath.Dir(path2)
-
-	// Walk up from the shorter path
-	parts1 := strings.Split(filepath.ToSlash(dir1), "/")
-	parts2 := strings.Split(filepath.ToSlash(dir2), "/")
-
-	minLen := len(parts1)
-	if len(parts2) < minLen {
-		minLen = len(parts2)
-	}
-
-	commonParts := []string{}
-	for i := 0; i < minLen; i++ {
-		if parts1[i] == parts2[i] {
-			commonParts = append(commonParts, parts1[i])
-		} else {
-			break
-		}
-	}
-
-	if len(commonParts) == 0 {
-		return ""
-	}
-
-	return strings.Join(commonParts, string(filepath.Separator))
-}
-
-// GetStackForModule returns the stack(s) a module belongs to
+// GetStackForModule returns the name(s) of the stack(s) a module belongs to.
+// The module may be given as a terragrunt.hcl file path or a directory,
+// absolute or relative to gitRoot.
 func (sm *StackManager) GetStackForModule(module string) []string {
-	return sm.moduleToStacks[module]
-}
-
-// ValidateStackCoverage ensures all modules are assigned to at least one stack
-func (sm *StackManager) ValidateStackCoverage(allModules []string) error {
-	// TODO: Implement validation
-	return nil
+	return sm.moduleToStacks[sm.normalizeModuleDir(module)]
 }

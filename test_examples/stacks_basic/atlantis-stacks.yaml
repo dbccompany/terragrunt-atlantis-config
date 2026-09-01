@@ -8,7 +8,6 @@ stacks:
     atlantis:
       workflow: default
       autoplan: true
-      parallel: true
       execution_order_group: 1
   
   - name: stack-b

@@ -9,10 +9,9 @@ projects:
     - '*.tf*'
     - '**/*.hcl'
     - '**/*.tf*'
-  dir: test_examples/stacks_basic/app-a
+  dir: .
   execution_order_group: 1
   name: stack-a
-  workspace: stack-a
   workflow: default
 - autoplan:
     enabled: true
@@ -21,14 +20,14 @@ projects:
     - '*.tf*'
     - '**/*.hcl'
     - '**/*.tf*'
-    - test_examples/stacks_basic/app-a
+    - ../app-a/**/*.hcl
+    - ../app-a/**/*.tf*
+    - ../app-b/**/*.hcl
+    - ../app-b/**/*.tf*
   depends_on:
   - stack-a
-  dir: test_examples/stacks_basic/app-c
+  dir: app-c
   execution_order_group: 2
   name: stack-b
-  workspace: stack-b
   workflow: default
 version: 3
-
-

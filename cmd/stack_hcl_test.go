@@ -50,8 +50,8 @@ stack "production" {
 	assert.Equal(t, 2, len(result.Units))
 	assert.Equal(t, "vpc", result.Units[0].Name)
 	assert.Equal(t, "database", result.Units[1].Name)
-	assert.NotNil(t, result.StackBlock)
-	assert.Equal(t, "production", result.StackBlock.Name)
+	assert.Equal(t, 1, len(result.Stacks))
+	assert.Equal(t, "production", result.Stacks[0].Name)
 }
 
 func TestFindStackHclFiles(t *testing.T) {
@@ -102,8 +102,144 @@ stack "production" {
 	stacks := ConvertStackHclToStacks([]StackHclDefinition{*def}, tmpDir)
 
 	assert.Equal(t, 1, len(stacks))
-	assert.Equal(t, "production", stacks[0].Name)
+	// Stack name is the stack file's directory relative to the git root
+	assert.Equal(t, ".", stacks[0].Name)
 	assert.Equal(t, "Production stack", stacks[0].Description)
 	assert.Equal(t, 1, len(stacks[0].Modules))
+	assert.Equal(t, "vpc", stacks[0].Modules[0])
 	assert.Equal(t, "terragrunt.stack.hcl", stacks[0].Source)
+}
+
+// TestParseStackHclFile_LiteralFallback ensures that stack files that cannot be
+// fully evaluated (e.g. functions referencing files that do not exist at
+// generation time) still get their statically-evaluable attributes parsed.
+func TestParseStackHclFile_LiteralFallback(t *testing.T) {
+	tmpDir := t.TempDir()
+	stackFile := filepath.Join(tmpDir, "terragrunt.stack.hcl")
+
+	// find_in_parent_folders("does/not/exist") fails at evaluation time, but
+	// the unit's path attribute is a plain literal and must survive.
+	content := `unit "vpc" {
+  source = "${find_in_parent_folders("does/not/exist")}"
+  path   = "vpc"
+}
+
+unit "db" {
+  source = "../units/db"
+  path   = "db"
+}
+`
+	require.NoError(t, os.WriteFile(stackFile, []byte(content), 0644))
+
+	terragruntOptions := options.NewTerragruntOptions()
+	ctx := config.NewParsingContext(context.Background(), terragruntOptions)
+
+	result, err := ParseStackHclFile(stackFile, ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, len(result.Units))
+	assert.Equal(t, "vpc", result.Units[0].Name)
+	require.NotNil(t, result.Units[0].Path)
+	assert.Equal(t, "vpc", *result.Units[0].Path)
+	assert.Equal(t, "db", result.Units[1].Name)
+	require.NotNil(t, result.Units[1].Source)
+	assert.Equal(t, "../units/db", *result.Units[1].Source)
+}
+
+// TestConvertStackHclToStacks_UnitSources ensures local unit source directories
+// (catalog style) are watched by the stack while remote sources are skipped.
+func TestConvertStackHclToStacks_UnitSources(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Layout: live/prod/terragrunt.stack.hcl sourcing units from ../../units/*
+	stackDir := filepath.Join(tmpDir, "live", "prod")
+	require.NoError(t, os.MkdirAll(stackDir, 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "units", "vpc"), 0755))
+
+	content := `unit "vpc" {
+  source = "../../units/vpc"
+  path   = "vpc"
+}
+
+unit "app" {
+  source = "git::https://github.com/example/app.git"
+  path   = "app"
+}
+`
+	stackFile := filepath.Join(stackDir, "terragrunt.stack.hcl")
+	require.NoError(t, os.WriteFile(stackFile, []byte(content), 0644))
+
+	terragruntOptions := options.NewTerragruntOptions()
+	ctx := config.NewParsingContext(context.Background(), terragruntOptions)
+
+	def, err := ParseStackHclFile(stackFile, ctx)
+	require.NoError(t, err)
+
+	stacks := ConvertStackHclToStacks([]StackHclDefinition{*def}, tmpDir)
+	require.Equal(t, 1, len(stacks))
+
+	stack := stacks[0]
+	assert.Equal(t, "live/prod", stack.Name)
+	assert.Equal(t, "live/prod/terragrunt.stack.hcl", stack.Source)
+	// No terragrunt.hcl exists at the unit paths, so no members are recorded
+	assert.Empty(t, stack.Modules)
+	// The local catalog dir is watched; the remote source is not
+	assert.Equal(t, []string{"units/vpc"}, stack.UnitSources)
+}
+
+// TestParseStackHclFile_NestedStacks ensures nested stack blocks expose their
+// source and path attributes.
+func TestParseStackHclFile_NestedStacks(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "stacks", "base"), 0755))
+	stackFile := filepath.Join(tmpDir, "terragrunt.stack.hcl")
+	content := `stack "base" {
+  source = "./stacks/base"
+  path   = "base"
+}
+
+unit "app" {
+  source = "./app"
+  path   = "app"
+}
+`
+	require.NoError(t, os.WriteFile(stackFile, []byte(content), 0644))
+
+	terragruntOptions := options.NewTerragruntOptions()
+	ctx := config.NewParsingContext(context.Background(), terragruntOptions)
+
+	result, err := ParseStackHclFile(stackFile, ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(result.Stacks))
+	assert.Equal(t, "base", result.Stacks[0].Name)
+	require.NotNil(t, result.Stacks[0].Source)
+	assert.Equal(t, "./stacks/base", *result.Stacks[0].Source)
+	require.NotNil(t, result.Stacks[0].Path)
+	assert.Equal(t, "base", *result.Stacks[0].Path)
+
+	stacks := ConvertStackHclToStacks([]StackHclDefinition{*result}, tmpDir)
+	require.Equal(t, 1, len(stacks))
+	// The nested stack's local source dir is watched by the parent stack
+	assert.Contains(t, stacks[0].UnitSources, "stacks/base")
+}
+
+// TestFindStackHclFiles_SkipsGeneratedDirs ensures terragrunt-internal and
+// VCS directories are not searched for stack files.
+func TestFindStackHclFiles_SkipsGeneratedDirs(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	dirs := []string{
+		filepath.Join(tmpDir, "live", "prod"),
+		filepath.Join(tmpDir, "live", "prod", ".terragrunt-stack", "vpc"),
+		filepath.Join(tmpDir, ".git"),
+		filepath.Join(tmpDir, "units", "vpc", ".terragrunt-cache", "abc123"),
+	}
+	for _, d := range dirs {
+		require.NoError(t, os.MkdirAll(d, 0755))
+		require.NoError(t, os.WriteFile(filepath.Join(d, "terragrunt.stack.hcl"), []byte(""), 0644))
+	}
+
+	stackFiles, err := FindStackHclFiles(tmpDir)
+	require.NoError(t, err)
+	assert.Equal(t, []string{filepath.Join(tmpDir, "live", "prod", "terragrunt.stack.hcl")}, stackFiles)
 }

@@ -318,7 +318,7 @@ stacks:
 func TestStackManager_GenerateStackProject(t *testing.T) {
 	t.Run("with CreateProjectName enabled", func(t *testing.T) {
 		mgr := NewStackManager(StackManagerConfig{
-			GitRoot:         "/repo",
+			GitRoot:           "/repo",
 			CreateProjectName: true,
 		})
 
@@ -330,7 +330,6 @@ func TestStackManager_GenerateStackProject(t *testing.T) {
 			AtlantisConfig: StackAtlantisConfig{
 				Workflow:          "test-workflow",
 				AutoPlan:          true,
-				Parallel:          true,
 				ApplyRequirements: []string{"approved"},
 				Workspace:         "test-workspace",
 			},
@@ -350,7 +349,7 @@ func TestStackManager_GenerateStackProject(t *testing.T) {
 
 	t.Run("with CreateProjectName disabled", func(t *testing.T) {
 		mgr := NewStackManager(StackManagerConfig{
-			GitRoot:         "/repo",
+			GitRoot:           "/repo",
 			CreateProjectName: false,
 		})
 
@@ -362,7 +361,6 @@ func TestStackManager_GenerateStackProject(t *testing.T) {
 			AtlantisConfig: StackAtlantisConfig{
 				Workflow:          "test-workflow",
 				AutoPlan:          true,
-				Parallel:          true,
 				ApplyRequirements: []string{"approved"},
 				Workspace:         "test-workspace",
 			},
@@ -377,8 +375,134 @@ func TestStackManager_GenerateStackProject(t *testing.T) {
 		assert.Equal(t, "test-workspace", project.Workspace)
 		assert.True(t, project.Autoplan.Enabled)
 		assert.Equal(t, 10, *project.ExecutionOrderGroup)
-		assert.Equal(t, []string{"dependency-stack"}, project.DependsOn)
+		// depends_on references project names, so without --create-project-name
+		// there is nothing valid to reference
+		assert.Empty(t, project.DependsOn)
 	})
+}
+
+func TestStackManager_GenerateStackProject_GlobalFlags(t *testing.T) {
+	mgr := NewStackManager(StackManagerConfig{
+		GitRoot:                 "/repo",
+		CreateProjectName:       true,
+		CreateWorkspace:         true,
+		AutoPlan:                true,
+		DefaultTerraformVersion: "1.9.0",
+		StackWorkflow:           "stack-wf",
+	})
+
+	t.Run("global flags are applied to HCL stacks", func(t *testing.T) {
+		stack := Stack{
+			Name:   "live/prod",
+			Source: "live/prod/terragrunt.stack.hcl",
+		}
+
+		project, err := mgr.GenerateStackProject(stack)
+		require.NoError(t, err)
+		assert.Equal(t, "live/prod", project.Dir)
+		assert.Equal(t, "live_prod", project.Name)
+		assert.Equal(t, "live_prod", project.Workspace)
+		assert.Equal(t, "stack-wf", project.Workflow)
+		assert.True(t, project.Autoplan.Enabled, "global --autoplan should enable stack autoplan")
+		assert.Equal(t, "1.9.0", project.TerraformVersion)
+	})
+
+	t.Run("explicit stack settings take precedence", func(t *testing.T) {
+		stack := Stack{
+			Name:   "live/staging",
+			Source: "live/staging/terragrunt.stack.hcl",
+			AtlantisConfig: StackAtlantisConfig{
+				Workflow:         "custom-wf",
+				Workspace:        "custom-ws",
+				TerraformVersion: "1.5.0",
+			},
+		}
+
+		project, err := mgr.GenerateStackProject(stack)
+		require.NoError(t, err)
+		assert.Equal(t, "custom-wf", project.Workflow)
+		assert.Equal(t, "custom-ws", project.Workspace)
+		assert.Equal(t, "1.5.0", project.TerraformVersion)
+	})
+
+	t.Run("unit sources outside the stack dir are watched", func(t *testing.T) {
+		stack := Stack{
+			Name:        "live/prod",
+			Source:      "live/prod/terragrunt.stack.hcl",
+			UnitSources: []string{"units/vpc", "units/app"},
+		}
+
+		project, err := mgr.GenerateStackProject(stack)
+		require.NoError(t, err)
+		assert.Equal(t, "live/prod", project.Dir)
+		assert.Contains(t, project.Autoplan.WhenModified, "../../units/vpc/**/*.hcl")
+		assert.Contains(t, project.Autoplan.WhenModified, "../../units/vpc/**/*.tf*")
+		assert.Contains(t, project.Autoplan.WhenModified, "../../units/app/**/*.hcl")
+	})
+
+	t.Run("modules inside the stack dir are covered by base patterns", func(t *testing.T) {
+		stack := Stack{
+			Name:    "mystack",
+			Source:  "mystack/terragrunt.stack.hcl",
+			Modules: []string{"mystack/vpc", "mystack/app"},
+		}
+
+		project, err := mgr.GenerateStackProject(stack)
+		require.NoError(t, err)
+		assert.Equal(t, "mystack", project.Dir)
+		assert.Equal(t, []string{"*.hcl", "*.tf*", "**/*.hcl", "**/*.tf*"}, project.Autoplan.WhenModified)
+	})
+
+	t.Run("dependency stack dirs are watched", func(t *testing.T) {
+		mgr := NewStackManager(StackManagerConfig{GitRoot: "/repo"})
+		mgr.stacks = []Stack{
+			{Name: "shared", Source: "shared/terragrunt.stack.hcl", Modules: []string{"shared/vpc"}},
+			{Name: "app", Source: "app/terragrunt.stack.hcl", Dependencies: []string{"shared"}},
+		}
+
+		project, err := mgr.GenerateStackProject(mgr.stacks[1])
+		require.NoError(t, err)
+		assert.Equal(t, "app", project.Dir)
+		assert.Contains(t, project.Autoplan.WhenModified, "../shared/vpc/**/*.hcl")
+	})
+}
+
+func TestStackManager_AssignModulesToStacks(t *testing.T) {
+	mgr := NewStackManager(StackManagerConfig{GitRoot: "/repo"})
+	mgr.stacks = []Stack{
+		{
+			Name:    "mystack",
+			Source:  "mystack/terragrunt.stack.hcl",
+			Modules: []string{"mystack/vpc", "mystack/app"},
+		},
+		{
+			Name:    "prod-env",
+			Include: []string{"environments/production/**"},
+			Exclude: []string{"environments/production/experimental/**"},
+		},
+	}
+
+	// terragrunt modules are usually discovered as paths to terragrunt.hcl files
+	modules := []string{
+		"mystack/vpc/terragrunt.hcl",
+		"/repo/mystack/app/terragrunt.hcl",
+		"environments/production/app/terragrunt.hcl",
+		"environments/production/experimental/db/terragrunt.hcl",
+		"environments/staging/app/terragrunt.hcl",
+	}
+
+	assignments, err := mgr.AssignModulesToStacks(modules)
+	require.NoError(t, err)
+
+	assert.ElementsMatch(t, []string{"mystack/vpc", "mystack/app"}, assignments["mystack"])
+	assert.ElementsMatch(t, []string{"environments/production/app"}, assignments["prod-env"])
+
+	// GetStackForModule must work with file paths, directories and absolute paths
+	assert.Equal(t, []string{"mystack"}, mgr.GetStackForModule("mystack/vpc/terragrunt.hcl"))
+	assert.Equal(t, []string{"mystack"}, mgr.GetStackForModule("/repo/mystack/app/terragrunt.hcl"))
+	assert.Equal(t, []string{"prod-env"}, mgr.GetStackForModule("environments/production/app"))
+	assert.Empty(t, mgr.GetStackForModule("environments/staging/app/terragrunt.hcl"))
+	assert.Empty(t, mgr.GetStackForModule("environments/production/experimental/db/terragrunt.hcl"))
 }
 
 // Helper function
