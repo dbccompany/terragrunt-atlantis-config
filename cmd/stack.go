@@ -352,7 +352,7 @@ func (sm *StackManager) loadStackHclFiles() ([]Stack, error) {
 	// Parse each stack file
 	stackDefinitions := []StackHclDefinition{}
 	for _, stackFile := range stackFiles {
-		def, err := ParseStackHclFile(stackFile, ctx)
+		def, err := ParseStackHclFile(stackFile, ctx, sm.config.GitRoot)
 		if err != nil {
 			log.Warnf("Failed to parse stack HCL file %s: %v", stackFile, err)
 			continue

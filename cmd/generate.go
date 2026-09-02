@@ -637,6 +637,12 @@ func FindConfigFilesInPath(rootPath string, opts *options.TerragruntOptions) ([]
 
 	err := walkFunc(rootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			// Unreadable directories (e.g. stale root-owned .terragrunt-cache
+			// from container runs) must not abort discovery of everything else
+			if info != nil && info.IsDir() {
+				log.Warnf("Skipping unreadable directory %s: %v", path, err)
+				return filepath.SkipDir
+			}
 			return err
 		}
 
@@ -665,14 +671,39 @@ func FindConfigFilesInPath(rootPath string, opts *options.TerragruntOptions) ([]
 	})
 
 	nestedConfigFiles, err := config.FindConfigFilesInPath(rootPath, opts)
-	if err == nil {
-		for _, nestedFile := range nestedConfigFiles {
-			// Skip files in .terragrunt-stack directories when stack support is enabled
-			if enableStacks && (strings.Contains(nestedFile, "/.terragrunt-stack/") || strings.Contains(nestedFile, "\\.terragrunt-stack\\")) {
-				continue
+	if err != nil {
+		// The terragrunt library's own walk aborts entirely on unreadable
+		// directories (e.g. stale root-owned .terragrunt-cache left behind by
+		// container runs). Falling back to a tolerant walk here keeps a
+		// single bad directory from silently producing an empty config.
+		log.Warnf("terragrunt config discovery failed (%v), falling back to tolerant walk", err)
+		_ = walkFunc(rootPath, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				if info != nil && info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
 			}
-			configFiles = append(configFiles, nestedFile)
+			if info.IsDir() {
+				switch info.Name() {
+				case ".git", ".terragrunt-stack", ".terragrunt-cache":
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if info.Name() == "terragrunt.hcl" {
+				configFiles = append(configFiles, path)
+			}
+			return nil
+		})
+		return configFiles, nil
+	}
+	for _, nestedFile := range nestedConfigFiles {
+		// Skip files in .terragrunt-stack directories when stack support is enabled
+		if enableStacks && (strings.Contains(nestedFile, "/.terragrunt-stack/") || strings.Contains(nestedFile, "\\.terragrunt-stack\\")) {
+			continue
 		}
+		configFiles = append(configFiles, nestedFile)
 	}
 	return configFiles, nil
 }

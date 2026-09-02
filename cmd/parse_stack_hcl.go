@@ -96,7 +96,6 @@ func parseAnchoredUnitConfig(sourceFile, anchorFile, gitRoot string, seen map[st
 	}
 
 	anchorDir := filepath.Dir(anchorFile)
-	cleanGitRoot := filepath.Clean(gitRoot)
 
 	// Build the anchored Terragrunt evaluation context
 	var evalContext *hcl.EvalContext
@@ -110,24 +109,7 @@ func parseAnchoredUnitConfig(sourceFile, anchorFile, gitRoot string, seen map[st
 			log.Debugf("Failed to create eval context for %s: %v", sourceFile, err)
 			evalContext = nil
 		} else {
-			staticStringFunc := func(value string) function.Function {
-				return function.New(&function.Spec{
-					Params: []function.Parameter{},
-					Type:   function.StaticReturnType(cty.String),
-					Impl:   func(args []cty.Value, retType cty.Type) (cty.Value, error) { return cty.StringVal(value), nil },
-				})
-			}
-			// These functions exec git inside the config's directory, which does
-			// not exist yet for generated units — pin them to known values
-			if _, ok := evalContext.Functions["get_repo_root"]; ok {
-				evalContext.Functions["get_repo_root"] = staticStringFunc(cleanGitRoot)
-			}
-			if _, ok := evalContext.Functions["get_path_from_repo_root"]; ok {
-				anchorRel, relErr := filepath.Rel(cleanGitRoot, anchorDir)
-				if relErr == nil {
-					evalContext.Functions["get_path_from_repo_root"] = staticStringFunc(filepath.ToSlash(anchorRel))
-				}
-			}
+			overrideRepoRootFunctions(evalContext, gitRoot, anchorDir)
 		}
 	}
 
@@ -199,6 +181,36 @@ func parseAnchoredUnitConfig(sourceFile, anchorFile, gitRoot string, seen map[st
 	}
 }
 
+// staticStringFunc returns an HCL function producing a fixed string.
+func staticStringFunc(value string) function.Function {
+	return function.New(&function.Spec{
+		Params: []function.Parameter{},
+		Type:   function.StaticReturnType(cty.String),
+		Impl:   func(args []cty.Value, retType cty.Type) (cty.Value, error) { return cty.StringVal(value), nil },
+	})
+}
+
+// overrideRepoRootFunctions replaces evaluation-context functions that exec
+// `git` inside the configuration's directory. The directory of a generated
+// unit does not exist until `terragrunt stack generate` runs, and in
+// containers git may refuse to operate on a checkout owned by another user
+// (safe.directory) — the generator cannot rely on git at all. Repo-relative
+// results are known statically because the anchor is always inside gitRoot.
+func overrideRepoRootFunctions(evalContext *hcl.EvalContext, gitRoot, anchorDir string) {
+	if evalContext == nil || evalContext.Functions == nil {
+		return
+	}
+	cleanGitRoot := filepath.Clean(gitRoot)
+	if _, ok := evalContext.Functions["get_repo_root"]; ok {
+		evalContext.Functions["get_repo_root"] = staticStringFunc(cleanGitRoot)
+	}
+	if _, ok := evalContext.Functions["get_path_from_repo_root"]; ok {
+		if anchorRel, err := filepath.Rel(cleanGitRoot, anchorDir); err == nil && !strings.HasPrefix(anchorRel, "..") {
+			evalContext.Functions["get_path_from_repo_root"] = staticStringFunc(filepath.ToSlash(anchorRel))
+		}
+	}
+}
+
 // ParseStackHclFile reads and parses a terragrunt.stack.hcl file.
 //
 // The file is first decoded with a full Terragrunt evaluation context so that
@@ -207,7 +219,7 @@ func parseAnchoredUnitConfig(sourceFile, anchorFile, gitRoot string, seen map[st
 // (e.g. remote sources, missing parent files); in that case we fall back to a
 // literal decoding pass that only extracts statically-evaluable attributes,
 // instead of failing the whole file.
-func ParseStackHclFile(path string, ctx *config.ParsingContext) (*StackHclDefinition, error) {
+func ParseStackHclFile(path string, ctx *config.ParsingContext, gitRoot string) (*StackHclDefinition, error) {
 	// Check if file exists
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil, fmt.Errorf("stack HCL file not found: %s", path)
@@ -232,6 +244,7 @@ func ParseStackHclFile(path string, ctx *config.ParsingContext) (*StackHclDefini
 	// Try decoding with a full Terragrunt evaluation context first
 	evalContext, evalCtxErr := createTerragruntEvalContext(ctx, path)
 	if evalCtxErr == nil {
+		overrideRepoRootFunctions(evalContext, gitRoot, filepath.Dir(path))
 		decodeDiagnostics := gohcl.DecodeBody(file.Body, evalContext, &parsed)
 		if decodeDiagnostics != nil && decodeDiagnostics.HasErrors() {
 			log.Debugf("Failed to evaluate stack HCL file %s with Terragrunt context (%v), falling back to literal parsing", path, decodeDiagnostics)
@@ -349,6 +362,12 @@ func FindStackHclFiles(rootDir string) ([]string, error) {
 
 	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			// Unreadable directories (e.g. stale root-owned .terragrunt-cache)
+			// must not abort stack discovery
+			if info != nil && info.IsDir() {
+				log.Warnf("Skipping unreadable directory %s: %v", path, err)
+				return filepath.SkipDir
+			}
 			return err
 		}
 
@@ -485,6 +504,19 @@ func ConvertStackHclToStacks(definitions []StackHclDefinition, gitRoot string) [
 	return stacks
 }
 
+// safeGetDependencies wraps getDependencies so a broken dependency (parse
+// failure or library panic, e.g. in environments where git cannot operate on
+// the checkout) degrades to an error instead of aborting generation.
+func safeGetDependencies(ctx *config.ParsingContext, path string) (deps []string, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Debugf("Recovered panic while resolving dependencies of %s: %v", path, r)
+			deps, err = nil, fmt.Errorf("panic while resolving dependencies of %s: %v", path, r)
+		}
+	}()
+	return getDependencies(ctx, path)
+}
+
 // EnrichStackWithUnitDetails inspects the units of a stack and fills in
 // ExtraWatchPaths so the stack project tracks exactly what the units would
 // track if they were standalone projects:
@@ -575,7 +607,7 @@ func EnrichStackWithUnitDetails(stack *Stack, def StackHclDefinition, gitRoot st
 			}
 			depOpts.Env = getEnvs()
 			depCtx := config.NewParsingContext(context.Background(), depOpts)
-			cascaded, err := getDependencies(depCtx, depFile)
+			cascaded, err := safeGetDependencies(depCtx, depFile)
 			if err != nil {
 				log.Debugf("Failed to cascade stack dependency %s: %v", depFile, err)
 				continue

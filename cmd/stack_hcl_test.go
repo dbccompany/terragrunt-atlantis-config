@@ -43,7 +43,7 @@ stack "production" {
 	ctx := config.NewParsingContext(context.Background(), terragruntOptions)
 
 	// Parse the stack file
-	result, err := ParseStackHclFile(stackFile, ctx)
+	result, err := ParseStackHclFile(stackFile, ctx, tmpDir)
 	require.NoError(t, err)
 
 	assert.NotNil(t, result)
@@ -95,7 +95,7 @@ stack "production" {
 	terragruntOptions := options.NewTerragruntOptions()
 	ctx := config.NewParsingContext(context.Background(), terragruntOptions)
 
-	def, err := ParseStackHclFile(stackFile, ctx)
+	def, err := ParseStackHclFile(stackFile, ctx, tmpDir)
 	require.NoError(t, err)
 
 	// Convert to stacks
@@ -134,7 +134,7 @@ unit "db" {
 	terragruntOptions := options.NewTerragruntOptions()
 	ctx := config.NewParsingContext(context.Background(), terragruntOptions)
 
-	result, err := ParseStackHclFile(stackFile, ctx)
+	result, err := ParseStackHclFile(stackFile, ctx, tmpDir)
 	require.NoError(t, err)
 	require.Equal(t, 2, len(result.Units))
 	assert.Equal(t, "vpc", result.Units[0].Name)
@@ -171,7 +171,7 @@ unit "app" {
 	terragruntOptions := options.NewTerragruntOptions()
 	ctx := config.NewParsingContext(context.Background(), terragruntOptions)
 
-	def, err := ParseStackHclFile(stackFile, ctx)
+	def, err := ParseStackHclFile(stackFile, ctx, tmpDir)
 	require.NoError(t, err)
 
 	stacks := ConvertStackHclToStacks([]StackHclDefinition{*def}, tmpDir)
@@ -208,7 +208,7 @@ unit "app" {
 	terragruntOptions := options.NewTerragruntOptions()
 	ctx := config.NewParsingContext(context.Background(), terragruntOptions)
 
-	result, err := ParseStackHclFile(stackFile, ctx)
+	result, err := ParseStackHclFile(stackFile, ctx, tmpDir)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(result.Stacks))
 	assert.Equal(t, "base", result.Stacks[0].Name)
@@ -333,7 +333,7 @@ dependency "shared" {
 
 	terragruntOptions := options.NewTerragruntOptions()
 	ctx := config.NewParsingContext(context.Background(), terragruntOptions)
-	def, err := ParseStackHclFile(stackFile, ctx)
+	def, err := ParseStackHclFile(stackFile, ctx, root)
 	require.NoError(t, err)
 
 	stacks := ConvertStackHclToStacks([]StackHclDefinition{*def}, root)
@@ -368,4 +368,24 @@ func TestStackManager_IsStackSourceDir(t *testing.T) {
 	assert.True(t, mgr.IsStackSourceDir("units/vpc/submodule"))
 	assert.False(t, mgr.IsStackSourceDir("units/db"))
 	assert.False(t, mgr.IsStackSourceDir("live/prod"))
+}
+
+// TestFindStackHclFiles_UnreadableDir ensures discovery tolerates directories
+// it cannot read (e.g. stale root-owned .terragrunt-cache from container runs).
+func TestFindStackHclFiles_UnreadableDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	goodDir := filepath.Join(tmpDir, "live", "prod")
+	require.NoError(t, os.MkdirAll(goodDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(goodDir, "terragrunt.stack.hcl"), []byte(""), 0644))
+
+	brokenDir := filepath.Join(tmpDir, "live", ".terragrunt-cache", "abc")
+	require.NoError(t, os.MkdirAll(brokenDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(brokenDir, "terragrunt.stack.hcl"), []byte(""), 0644))
+	require.NoError(t, os.Chmod(filepath.Join(tmpDir, "live", ".terragrunt-cache"), 0000))
+	t.Cleanup(func() { os.Chmod(filepath.Join(tmpDir, "live", ".terragrunt-cache"), 0755) })
+
+	stackFiles, err := FindStackHclFiles(tmpDir)
+	require.NoError(t, err)
+	assert.Equal(t, []string{filepath.Join(goodDir, "terragrunt.stack.hcl")}, stackFiles)
 }
