@@ -349,10 +349,12 @@ dependency "shared" {
 
 	EnrichStackWithUnitDetails(&stack, *def, root)
 
-	assert.Contains(t, stack.ExtraWatchPaths, filepath.Join(root, "cloud.hcl"))
+	// watch paths are slash-normalized internally
+	slash := func(p string) string { return filepath.ToSlash(p) }
+	assert.Contains(t, stack.ExtraWatchPaths, slash(filepath.Join(root, "cloud.hcl")))
 	// external dependency is recorded (and cascaded: shared's *.tf* pattern)
-	assert.Contains(t, stack.ExtraWatchPaths, filepath.Join(root, "shared", "terragrunt.hcl"))
-	assert.Contains(t, stack.ExtraWatchPaths, filepath.Join(root, "shared", "*.tf*"))
+	assert.Contains(t, stack.ExtraWatchPaths, slash(filepath.Join(root, "shared", "terragrunt.hcl")))
+	assert.Contains(t, stack.ExtraWatchPaths, slash(filepath.Join(root, "shared", "*.tf*")))
 }
 
 // TestStackManager_IsStackSourceDir verifies catalog dirs are excluded from
