@@ -94,6 +94,8 @@ Semantics:
   - local `terraform { source = ... }` directories of unit configs are watched.
 - **Remote sources** (git refs, registry addresses) cannot be watched and are skipped.
 - **Nested `stack` blocks** contribute their local `source` directories to `when_modified`.
+  Every `terragrunt.stack.hcl` found in the repo gets its own project regardless of nesting
+  (a nested stack definition file is itself discovered and projected).
 - **Parsing is tolerant**: the file is first decoded with a full Terragrunt evaluation context
   (so functions like `find_in_parent_folders()` work); if evaluation fails, a fallback pass
   extracts the statically-evaluable `source`/`path` literals instead of dropping the file.
@@ -147,18 +149,59 @@ See `test_examples/stacks_basic/` and `test_examples/stacks_with_patterns/`.
 ## Atlantis workflow for stacks
 
 Stack projects need a workflow that runs stack commands. Define it in the `workflows` section of
-your `atlantis.yaml` (preserved across regeneration with `--preserve-workflows`) or server-side:
+your `atlantis.yaml` (preserved across regeneration with `--preserve-workflows`) or server-side.
+A battle-tested variant that also keeps Atlantis policy checks working (tested with
+runatlantis/atlantis v0.47.1):
 
 ```yaml
 workflows:
   terragrunt-stack:
     plan:
       steps:
-        - run: terragrunt stack run plan
-    apply:
+        - run: |
+            # -out is relative; each unit's planfile lands in its own
+            # .terragrunt-cache working dir for the policy_check step.
+            terragrunt stack run -- plan -input=false -out=tac-stack-plan.tfplan
+            # Atlantis's policy_check delegate unconditionally reads the
+            # workflow-conventional planfile (<dir>/<workspace>.tfplan)
+            # before running any policy step. Create it (local backends
+            # never read its content).
+            touch "$PLANFILE"
+    policy_check:
       steps:
-        - run: terragrunt stack run apply
+        - run: |
+            set -e
+            tmpdir=$(mktemp -d)
+            find . -type f -name tac-stack-plan.tfplan -path '*/.terragrunt-cache/*' | sort |
+            (i=0
+             while IFS= read -r plan; do
+               i=$((i + 1)); dir=$(dirname "$plan")
+               (cd "$dir" && tofu"${ATLANTIS_TERRAFORM_VERSION}" show -json tac-stack-plan.tfplan) > "$tmpdir/$i.json"
+             done)
+            [ -e "$tmpdir/1.json" ] || { echo '{"resource_changes": []}' > "$SHOWFILE"; rm -rf "$tmpdir"; exit 0; }
+            jq -s '{format_version: (.[0].format_version // "1.2"),
+                    resource_changes: [ .[] | (.resource_changes // [])[] ]}' "$tmpdir"/*.json > "$SHOWFILE"
+        - policy_check
 ```
+
+The `policy_check` step above renders each unit's plan to JSON and merges the `resource_changes`
+arrays into one synthetic plan at `$SHOWFILE`, so OPA/conftest gates a stack exactly like a
+regular project ("Phase 2" of policy enforcement applies uniformly).
+
+### Unapplied dependencies (first plan of a new stack)
+
+Units reading `dependency.X.outputs.*` fail on the very first plan if `X` has never been applied
+(`tofu output` has nothing to return). Terragrunt's idiomatic remedy is `mock_outputs`:
+
+```hcl
+dependency "vpc" {
+  config_path = "../main"
+  mock_outputs = { vpc_id = "vpc-mock0000000000000" }
+}
+```
+
+Once the dependency is applied, real state takes over (default `no_merge`), so the mock only ever
+matters for the bootstrapping window.
 
 ## Current limitations
 
@@ -167,10 +210,13 @@ workflows:
 - Explicit `depends_on` between stack projects requires the definition file.
 - `locals { extra_atlantis_dependencies = ... }` inside unit configs are not yet collected
   (upstream feature parity todo).
+- Atlantis policy_check needs a workflow-conventional planfile to exist (the step above takes care
+  of it); without it the built-in phase fails with `open .../default.tfplan: no such file`.
 
 ## Tests
 
-- Unit tests: `cmd/stack_test.go`, `cmd/stack_hcl_test.go`
+- Unit tests: `cmd/stack_test.go`, `cmd/stack_hcl_test.go` (incl. nested stack parsing,
+  external-dependency cascading, catalog exclusion and unreadable-directory tolerance)
 - Golden-file integration tests: `TestStacks*` in `cmd/generate_test.go` with expected outputs in
   `cmd/golden/stacks_*.yaml`, including flag-off regression tests pinning the pre-existing
   behavior on the same example repositories.

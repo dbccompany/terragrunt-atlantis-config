@@ -164,7 +164,9 @@ When `--enable-stacks` is not set, stack files are ignored and output is identic
 versions.
 
 Example workflow definition for stack projects (define it in your `atlantis.yaml` `workflows`
-section or server-side, and select it with `--stack-workflow`):
+section or server-side, and select it with `--stack-workflow`). A production-grade variant that
+keeps per-unit plans available to OPA policy checks is in
+[README_STACKS.md](README_STACKS.md#atlantis-workflow-for-stacks):
 
 ```yaml
 workflows:
@@ -178,7 +180,7 @@ workflows:
         - run: terragrunt stack run apply
 ```
 
-(`terragrunt stack run` regenerates the stack into `.terragrunt-stack` before executing`)
+(`terragrunt stack run` regenerates the stack into `.terragrunt-stack` before executing)
 
 ## Project generation
 

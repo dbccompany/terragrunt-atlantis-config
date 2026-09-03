@@ -708,6 +708,20 @@ projects:
     when_modified:
     - '*.hcl'
     - '*.tf*'
+    - ../vpc/terragrunt.hcl
+    - ../vpc/*.tf*
+  dir: stacks_nested/catalog/db
+- autoplan:
+    enabled: false
+    when_modified:
+    - '*.hcl'
+    - '*.tf*'
+  dir: stacks_nested/catalog/vpc
+- autoplan:
+    enabled: false
+    when_modified:
+    - '*.hcl'
+    - '*.tf*'
     - ../../../shared/vpc/terragrunt.hcl
   dir: stacks_with_patterns/environments/production/app
 - autoplan:

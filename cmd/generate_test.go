@@ -772,3 +772,21 @@ func TestStacksWithPatterns(t *testing.T) {
 		"--create-project-name",
 	})
 }
+
+func TestStacksWithNestedStacksAndUnits(t *testing.T) {
+	runTest(t, filepath.Join("golden", "stacks_nested.yaml"), []string{
+		"--root",
+		filepath.Join("..", "test_examples", "stacks_nested"),
+		"--enable-stacks",
+		"--create-project-name",
+	})
+}
+
+// Nested stack files are ignored without the flag (catalog units getting
+// plain projects in that mode matches public repo behavior).
+func TestStacksNestedWithoutStacksFlag(t *testing.T) {
+	runTest(t, filepath.Join("golden", "stacks_nested_disabled.yaml"), []string{
+		"--root",
+		filepath.Join("..", "test_examples", "stacks_nested"),
+	})
+}
