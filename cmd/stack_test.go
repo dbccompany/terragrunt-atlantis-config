@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -468,7 +469,12 @@ func TestStackManager_GenerateStackProject_GlobalFlags(t *testing.T) {
 }
 
 func TestStackManager_AssignModulesToStacks(t *testing.T) {
-	mgr := NewStackManager(StackManagerConfig{GitRoot: "/repo"})
+	// Use a real absolute path as gitRoot: on Windows "/repo" is not absolute,
+	// so an absolute module path built from it could not be normalized.
+	repoRoot := t.TempDir()
+	absApp := filepath.Join(repoRoot, "mystack", "app", "terragrunt.hcl")
+
+	mgr := NewStackManager(StackManagerConfig{GitRoot: repoRoot})
 	mgr.stacks = []Stack{
 		{
 			Name:    "mystack",
@@ -485,7 +491,7 @@ func TestStackManager_AssignModulesToStacks(t *testing.T) {
 	// terragrunt modules are usually discovered as paths to terragrunt.hcl files
 	modules := []string{
 		"mystack/vpc/terragrunt.hcl",
-		"/repo/mystack/app/terragrunt.hcl",
+		absApp,
 		"environments/production/app/terragrunt.hcl",
 		"environments/production/experimental/db/terragrunt.hcl",
 		"environments/staging/app/terragrunt.hcl",
@@ -499,7 +505,7 @@ func TestStackManager_AssignModulesToStacks(t *testing.T) {
 
 	// GetStackForModule must work with file paths, directories and absolute paths
 	assert.Equal(t, []string{"mystack"}, mgr.GetStackForModule("mystack/vpc/terragrunt.hcl"))
-	assert.Equal(t, []string{"mystack"}, mgr.GetStackForModule("/repo/mystack/app/terragrunt.hcl"))
+	assert.Equal(t, []string{"mystack"}, mgr.GetStackForModule(absApp))
 	assert.Equal(t, []string{"prod-env"}, mgr.GetStackForModule("environments/production/app"))
 	assert.Empty(t, mgr.GetStackForModule("environments/staging/app/terragrunt.hcl"))
 	assert.Empty(t, mgr.GetStackForModule("environments/production/experimental/db/terragrunt.hcl"))
