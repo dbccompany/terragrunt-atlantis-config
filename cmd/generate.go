@@ -147,7 +147,12 @@ func getDependencies(ctx *config.ParsingContext, path string) ([]string, error) 
 		dependencies := []string{}
 		if len(includes) > 0 {
 			for _, includeDep := range includes {
-				getDependenciesCache.set(includeDep.Path, getDependenciesOutput{nil, err})
+				// NOTE: do NOT seed the cache for includeDep.Path here.
+				// Seeding it with a nil result (i.e. "skip this project")
+				// races with the include target's own project computation
+				// (e.g. with --ignore-parent-terragrunt=false): whichever
+				// goroutine reaches the path first decided whether the
+				// parent project existed at all, producing flaky output.
 				dependencies = append(dependencies, includeDep.Path)
 			}
 		}
