@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Setup golang
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: "^${{ matrix.golang-version }}"
       - name: Clear Go module cache
