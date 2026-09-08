@@ -4,9 +4,14 @@ on: [push, pull_request]
 jobs:
   run-tests:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
         golang-version: ["1.25.4"]
+        # terragrunt version installed on PATH. The cli engine validates
+        # against the real binary; one pre-0.99 legacy (auto falls back to
+        # library), the last library-era 0.99.5, and latest 1.x.
+        terragrunt-version: [v1.1.4, v0.99.5, v0.85.1]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -27,16 +32,25 @@ jobs:
       - name: Install terragrunt (CLI engine tests)
         shell: bash
         env:
-          TG_VERSION: v1.1.4
+          TG_VERSION: ${{ matrix.terragrunt-version }}
         run: |
           set -euo pipefail
+
+          # sha256 (linux_amd64 / windows_amd64.exe) per supported version.
+          case "${TG_VERSION}" in
+            v1.1.4) LIN=a2640da8455fa5f3671167e6373832b0907b9dc972dd01c2093cc7808934e158; WIN=d540fcac8a841f34053229d78aa7025c6ea6b6724568b0610f4748a87c75c929 ;;
+            v0.99.5) LIN=65ab30e0ceed1b67c85696fd71fc63dce431de81a79d3413a4d00bf49b0f74cd; WIN=1a06daa9e36a32d2891d315ea1e29a2365c5546f9fededb5952ae0efc2d887bd ;;
+            v0.85.1) LIN=7662eed6fa23cff352c996600c1cfdab085f19161cb6bd528e4125f31507f712; WIN=12f42628460e7b82d6597601ccdd95b5ba1b8171925ad2beb8b7de6b91dd3ca4 ;;
+            *) echo "unknown terragrunt version ${TG_VERSION}" >&2; exit 1 ;;
+          esac
+
           if [ "$RUNNER_OS" = "Windows" ]; then
             asset=terragrunt_windows_amd64.exe
-            sha=d540fcac8a841f34053229d78aa7025c6ea6b6724568b0610f4748a87c75c929
+            sha="$WIN"
             bin=terragrunt.exe
           else
             asset=terragrunt_linux_amd64
-            sha=a2640da8455fa5f3671167e6373832b0907b9dc972dd01c2093cc7808934e158
+            sha="$LIN"
             bin=terragrunt
           fi
           mkdir -p "$RUNNER_TEMP/tgbin"
