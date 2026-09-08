@@ -49,10 +49,11 @@ jobs:
           find "$BUILD_DIR" -type f -exec sha256sum {} + | awk -v build_dir="$BUILD_DIR" '{sub("^"build_dir"/", ""); printf "%s  %s\n", $1, $2}' > SHA256SUMS
           find "$BUILD_DIR" -type f -exec sha512sum {} + | awk -v build_dir="$BUILD_DIR" '{sub("^"build_dir"/", ""); printf "%s  %s\n", $1, $2}' > SHA512SUMS
 
-      # Create the release
-      - uses: "marvinpinto/action-automatic-releases@d68defdd11f9dcc7f52f35c1b7c236ee7513bcc1"
+      # Create the release. softprops/action-gh-release replaces the archived
+      # marvinpinto/action-automatic-releases (node16 → forced node20/24) and
+      # publishes the built binaries + checksums onto the tag-triggered release.
+      - uses: softprops/action-gh-release@v2
         with:
-          repo_token: "${{ secrets.GITHUB_TOKEN }}"
           prerelease: false
           files: |
             build/${{ steps.get_version.outputs.VERSION }}/*
