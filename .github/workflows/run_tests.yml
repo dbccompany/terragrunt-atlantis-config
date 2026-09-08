@@ -7,12 +7,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        golang-version: ["1.25.4"]
+        golang-version: ["1.27.1"]
         # terragrunt version installed on PATH. The cli engine validates
-        # against the real binary, so exercise a spread of the 1.x line plus
-        # the last library-consumable 0.x (auto falls back to library there).
-        # 1.1.4 = latest at time of writing.
-        terragrunt-version: [v1.1.4, v1.1.0, v1.0.8, v1.0.0, v0.99.5]
+        # against the real binary; one pre-0.99 legacy (auto falls back to
+        # library), the last library-era 0.99.5, and latest 1.x.
+        terragrunt-version: [v1.1.4, v0.99.5, v0.85.1]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -40,10 +39,8 @@ jobs:
           # sha256 (linux_amd64 / windows_amd64.exe) per supported version.
           case "${TG_VERSION}" in
             v1.1.4) LIN=a2640da8455fa5f3671167e6373832b0907b9dc972dd01c2093cc7808934e158; WIN=d540fcac8a841f34053229d78aa7025c6ea6b6724568b0610f4748a87c75c929 ;;
-            v1.1.0) LIN=acdf04d4a9d480228b19bcd995df549e6e2ce2d2125fe17d514371598a59f6c1; WIN=d1196bd44282fdfb85ec1c6cb7d3a4c09be9842ed8759dfc43dcd8d74c2b7089 ;;
-            v1.0.8) LIN=1ef75087d0a5db968a5e1801f40a7bf5ebdc145ad89ae72c584201fa301d15f4; WIN=3b4418bfb497609dc80274cc8cf95630aa7b54eb7f8c598047ee5f6cad3919d1 ;;
-            v1.0.0) LIN=98bffc93e6f8a07809842cd402f2b66b2935139911e7c513d38425a352c777b2; WIN=5aa9d3896b9f56b4b5f9f4acaacf77fce9a8895e234ba2e647f513f1dd52a2fa ;;
             v0.99.5) LIN=65ab30e0ceed1b67c85696fd71fc63dce431de81a79d3413a4d00bf49b0f74cd; WIN=1a06daa9e36a32d2891d315ea1e29a2365c5546f9fededb5952ae0efc2d887bd ;;
+            v0.85.1) LIN=7662eed6fa23cff352c996600c1cfdab085f19161cb6bd528e4125f31507f712; WIN=12f42628460e7b82d6597601ccdd95b5ba1b8171925ad2beb8b7de6b91dd3ca4 ;;
             *) echo "unknown terragrunt version ${TG_VERSION}" >&2; exit 1 ;;
           esac
 
