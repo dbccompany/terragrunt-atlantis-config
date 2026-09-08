@@ -1,6 +1,6 @@
 module github.com/dbccompany/terragrunt-atlantis-config
 
-go 1.25.8
+go 1.27
 
 require (
 	github.com/ghodss/yaml v1.0.0

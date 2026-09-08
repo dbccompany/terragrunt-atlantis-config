@@ -7,7 +7,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        golang-version: ["1.25.4"]
+        golang-version: ["1.27.1"]
         # terragrunt version installed on PATH. The cli engine validates
         # against the real binary; one pre-0.99 legacy (auto falls back to
         # library), the last library-era 0.99.5, and latest 1.x.
