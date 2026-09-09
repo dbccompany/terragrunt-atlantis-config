@@ -323,7 +323,7 @@ mv "terragrunt-atlantis-config_${VERSION}_linux_amd64" terragrunt-atlantis-confi
 chmod 755 terragrunt-atlantis-config
 ```
 
-This module officially supports golang version v1.25, tested on Github with each build. 
+This module officially supports golang v1.27, tested on Github with each build. 
 This module also officially supports both Windows and Nix-based file formats, tested on Github with each build. CLI-engine tests additionally run against the real `terragrunt` binary (currently v1.1.4, sha256-pinned) on Linux and Windows runners.
 
 Usage Examples (see below sections for all options):
