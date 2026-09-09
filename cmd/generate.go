@@ -1099,6 +1099,30 @@ func main(cmd *cobra.Command, args []string) error {
 		config.Projects = filtered
 	}
 
+	// --exclude prunes projects after discovery, for both engines. Patterns
+	// are directory selectors (root-, cwd-, or absolute form) — everything
+	// beneath a matched directory is dropped, mirroring --filter's glob
+	// semantics back-to-front. (See engine_cli.go dirGlobMatches.)
+	if len(excludePaths) > 0 {
+		normalised := normalizeFilterPaths(excludePaths, gitRoot)
+		kept := make([]AtlantisProject, 0, len(config.Projects))
+		for _, p := range config.Projects {
+			dropped := false
+			for _, ex := range normalised {
+				if dirGlobMatches(ex, p.Dir) {
+					dropped = true
+					break
+				}
+			}
+			if !dropped {
+				kept = append(kept, p)
+			} else {
+				log.Debugf("--exclude dropped project %s", p.Dir)
+			}
+		}
+		config.Projects = kept
+	}
+
 	// Sort the projects in config by Dir
 	sort.Slice(config.Projects, func(i, j int) bool { return config.Projects[i].Dir < config.Projects[j].Dir })
 
@@ -1269,6 +1293,7 @@ var enableStacks bool
 // project names and workspace names.
 var projectNameRegex = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
 var filterPaths []string
+var excludePaths []string
 var gitFilter string
 var outputPath string
 var preserveWorkflows bool
@@ -1322,6 +1347,7 @@ func init() {
 	generateCmd.PersistentFlags().StringSliceVar(&defaultApplyRequirements, "apply-requirements", []string{}, "Requirements that must be satisfied before `atlantis apply` can be run. Currently the only supported requirements are `approved` and `mergeable`. Can be overridden by locals")
 	generateCmd.PersistentFlags().StringVar(&outputPath, "output", "", "Path of the file where configuration will be generated. Default is not to write to file")
 	generateCmd.PersistentFlags().StringSliceVar(&filterPaths, "filter", []string{}, "Comma-separated paths or glob expressions to the directories you want scope down the config for. Default is all files in root.")
+	generateCmd.PersistentFlags().StringSliceVar(&excludePaths, "exclude", []string{}, "Comma-separated paths or glob expressions to subtract from the discovered projects. Directories and everything beneath a matched directory are dropped.")
 	generateCmd.PersistentFlags().StringVar(&gitFilter, "filter-git", "", "Only include projects whose autoplan triggers were touched between the given git ref and HEAD (e.g. origin/main). Works with both engines.")
 	generateCmd.PersistentFlags().StringVar(&gitRoot, "root", pwd, "Path to the root directory of the git repo you want to build config for. Default is current dir")
 	generateCmd.PersistentFlags().StringVar(&defaultTerraformVersion, "terraform-version", "", "Default terraform version to specify for all modules. Can be overriden by locals")
