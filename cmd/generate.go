@@ -557,9 +557,16 @@ func createHclProject(ctx context.Context, sourcePaths []string, workingDir stri
 				return nil, err
 			}
 
-			if !strings.Contains(absolutePath, filepath.ToSlash(workingDir)) {
-				relativeDependencies = append(relativeDependencies, filepath.ToSlash(relativePath))
+			// Paths inside the workingDir are already covered by the
+			// "**/*.hcl"/"**/*.tf*" base entries; only out-of-tree files are
+			// listed explicitly. Containment is decided by relative location —
+			// the previous substring match wrongly hid siblings whose path
+			// merely shared a prefix with the workingDir (e.g. "app2" vs
+			// "app"), silently dropping dependencies.
+			if relativePath != ".." && !strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+				continue
 			}
+			relativeDependencies = append(relativeDependencies, filepath.ToSlash(relativePath))
 		}
 
 		childDependencies = append(childDependencies, relativeDependencies...)
