@@ -21,6 +21,14 @@ updates:
       # API, remove this ignore.
       - dependency-name: "github.com/gruntwork-io/terragrunt"
         update-types: ["version-update:semver-major"]
+      # Transitive via terragrunt's git/CAS code, which terragrunt-atlantis-config
+      # never executes (parse-only usage). go-git/v6 has no stable patched
+      # release (only alphas that API-break terragrunt 0.99.5). Remove when the
+      # embedded terragrunt library is retired for the v1.x CLI.
+      - dependency-name: "github.com/go-git/go-git/v6"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "github.com/go-git/go-billy/v6"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
     # Group updates to reduce PR noise
     groups:
       production-dependencies:
