@@ -52,7 +52,7 @@ jobs:
       # Create the release. softprops/action-gh-release replaces the archived
       # marvinpinto/action-automatic-releases (node16 → forced node20/24) and
       # publishes the built binaries + checksums onto the tag-triggered release.
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           prerelease: false
           files: |
