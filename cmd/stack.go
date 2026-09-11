@@ -370,7 +370,10 @@ func (sm *StackManager) loadStackHclFiles() ([]Stack, error) {
 	}
 
 	// Convert to internal Stack structs and enrich with unit-level detail
-	// (include chains, external dependencies, terraform module sources)
+	// (include chains, external dependencies, terraform module sources).
+	// Reusable/catalog stack files (referenced as a `source` by another stack)
+	// are filtered out so they do not become their own projects.
+	stackDefinitions = filterReusableStackDefinitions(stackDefinitions, sm.config.GitRoot)
 	stacks := ConvertStackHclToStacks(stackDefinitions, sm.config.GitRoot)
 	for i := range stacks {
 		EnrichStackWithUnitDetails(&stacks[i], stackDefinitions[i], sm.config.GitRoot)
@@ -474,8 +477,8 @@ func (sm *StackManager) IsStackOwnedDir(module string) bool {
 			continue
 		}
 		for _, p := range stack.DeclaredPaths {
-			owned := stack.Name + "/" + p
-			if dir == owned || strings.HasPrefix(dir, owned+"/") {
+			// DeclaredPaths entries are already gitRoot-relative full paths.
+			if dir == p || strings.HasPrefix(dir, p+"/") {
 				return true
 			}
 		}
