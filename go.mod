@@ -86,7 +86,6 @@ require (
 	github.com/cncf/xds/go v0.0.0-20260202195803-dba9d589def2 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/creack/pty v1.1.24 // indirect
-	github.com/cyphar/filepath-securejoin v0.5.0 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
@@ -96,15 +95,14 @@ require (
 	github.com/getsops/sops/v3 v3.12.2 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
 	github.com/go-git/gcfg/v2 v2.0.2 // indirect
-	github.com/go-git/go-billy/v6 v6.0.0-20251022185412-61e52df296a5 // indirect
-	github.com/go-git/go-git/v6 v6.0.0-20251103200709-47b1ed2930c9 // indirect
+	github.com/go-git/go-billy/v6 v6.0.0-alpha.2 // indirect
+	github.com/go-git/go-git/v6 v6.0.0-alpha.5 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/gofrs/flock v0.13.0 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
-	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-github/v53 v53.2.0 // indirect
@@ -147,7 +145,7 @@ require (
 	github.com/jessevdk/go-flags v1.6.1 // indirect
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12 // indirect
 	github.com/jstemmer/go-junit-report v1.0.0 // indirect
-	github.com/kevinburke/ssh_config v1.4.0 // indirect
+	github.com/kevinburke/ssh_config v1.6.0 // indirect
 	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
@@ -168,7 +166,7 @@ require (
 	github.com/oklog/run v1.2.0 // indirect
 	github.com/owenrumney/go-sarif v1.1.1 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
-	github.com/pjbgf/sha1cd v0.5.0 // indirect
+	github.com/pjbgf/sha1cd v0.6.0 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20250313105119-ba97887b0a25 // indirect
