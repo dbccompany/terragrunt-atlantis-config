@@ -40,10 +40,17 @@ This is especially useful for organizations that use monorepos for their Terragr
 Terragrunt v1.0 closed its Go API (parsing moved behind `internal/`), so this
 tool ships two parsing engines and picks between them with `--engine`:
 
+> **Deprecation notice** — the `library` engine is frozen at terragrunt
+> v0.99.x (the last release with a consumable Go API) and is **slated for
+> removal in v1.27** of terragrunt-atlantis-config. Please migrate to the
+> `cli` engine: upgrade terragrunt to v1.x, or run `--engine=cli` with a v1.x
+> binary on `$PATH` (`--engine=auto` switches automatically once it's present).
+> A runtime warning is printed whenever the library engine is used.
+
 | Engine    | How it works                                                                                          | When to use it |
 | --------- | ------------------------------------------------------------------------------------------------------ | -------------- |
 | `cli`     | Runs `terragrunt find --json --dependencies --reading` on the terragrunt binary available on `$PATH`. Parsing semantics always match the terragrunt you actually execute plans with. | Terragrunt **v1.x** installs; stacks-heavy repos |
-| `library` | Uses an embedded copy of the terragrunt v0.99.x parser. Supports `atlantis_*` locals overrides and `--project-hcl-files`. | Repos without a terragrunt binary, older v0.x setups |
+| `library` | Uses an embedded copy of the terragrunt v0.99.x parser. Supports `atlantis_*` locals overrides and `--project-hcl-files`. **Deprecated.** | Repos without a terragrunt binary, older v0.x setups |
 | `auto`    | Uses `cli` when terragrunt v1+ is found on `$PATH`, otherwise falls back to `library`.                  | **Default** — safe everywhere |
 
 Notes:

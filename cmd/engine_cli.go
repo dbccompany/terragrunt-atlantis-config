@@ -740,3 +740,14 @@ func generateProjectsWithCLIEngine(root string) ([]AtlantisProject, error) {
 
 	return cliEngineProjects(components, root)
 }
+
+// warnLibraryEngineDeprecation prints a single, prominent heads-up whenever
+// the embedded terragrunt library engine is actually in use, steering users
+// toward the CLI engine (and terragrunt v1.x). The library engine is slated
+// for removal: v0.99.x is the last terragrunt release with a consumable Go
+// API, and the v1.x CLI already provides full coverage.
+func warnLibraryEngineDeprecation() {
+	log.Warnf(
+		"deprecated: the embedded terragrunt library engine (--engine=library) is frozen at terragrunt v0.99.x and will be removed in v1.27 of terragrunt-atlantis-config. Migrate to the CLI engine: upgrade terragrunt to v1.x (or run --engine=cli with a v1.x binary on PATH); --engine=auto does this automatically once terragrunt v1+ is installed.",
+	)
+}
