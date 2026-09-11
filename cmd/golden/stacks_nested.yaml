@@ -7,12 +7,10 @@ projects:
     when_modified:
     - '*.hcl'
     - '*.tf*'
-    - '**/*.hcl'
-    - '**/*.tf*'
-    - ../db/**/*.hcl
-    - ../db/**/*.tf*
-  dir: catalog/mini-stack
-  name: catalog_mini-stack
+    - ../vpc/terragrunt.hcl
+    - ../vpc/*.tf*
+  dir: catalog/db
+  name: catalog_db
 - autoplan:
     enabled: false
     when_modified:

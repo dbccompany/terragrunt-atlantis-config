@@ -394,6 +394,73 @@ func FindStackHclFiles(rootDir string) ([]string, error) {
 	return stackFiles, nil
 }
 
+// filterReusableStackDefinitions drops stack files whose directory is
+// referenced as a `source` by another stack's `unit` or `stack` block. Such
+// files are reusable/catalog components, not deployable roots, and must not
+// become their own Atlantis projects. Only stack files that nothing else
+// references are treated as deployable.
+func filterReusableStackDefinitions(definitions []StackHclDefinition, gitRoot string) []StackHclDefinition {
+	getDir := func(def StackHclDefinition) string {
+		return filepath.Clean(filepath.Dir(def.FilePath))
+	}
+
+	referenced := map[string]bool{}
+	resolve := func(src string, fromDir string) string {
+		if !filepath.IsAbs(src) {
+			src = filepath.Join(fromDir, src)
+		}
+		return filepath.Clean(src)
+	}
+	for _, def := range definitions {
+		fromDir := getDir(def)
+		for _, u := range def.Units {
+			if u.Source != nil {
+				referenced[resolve(*u.Source, fromDir)] = true
+			}
+		}
+		for _, s := range def.Stacks {
+			if s.Source != nil {
+				referenced[resolve(*s.Source, fromDir)] = true
+			}
+		}
+	}
+
+	dirs := map[string]bool{}
+	for _, def := range definitions {
+		dirs[getDir(def)] = true
+	}
+
+	roots := []StackHclDefinition{}
+	for _, def := range definitions {
+		dir := getDir(def)
+		if referenced[dir] {
+			log.Debugf("Skipping reusable stack component %s (referenced as a source by another stack)", def.FilePath)
+			continue
+		}
+		if nestedUnderStackDir(dir, dirs) {
+			log.Debugf("Skipping nested stack component %s (materialized inside another stack)", def.FilePath)
+			continue
+		}
+		roots = append(roots, def)
+	}
+	return roots
+}
+
+// nestedUnderStackDir reports whether dir has some other stack directory as a
+// strict ancestor (i.e. this stack file was generated inside a parent stack).
+func nestedUnderStackDir(dir string, stackDirs map[string]bool) bool {
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		if stackDirs[parent] {
+			return true
+		}
+		dir = parent
+	}
+}
+
 // ConvertStackHclToStacks converts parsed HCL stack definitions to internal Stack structs.
 //
 // For every unit (and nested stack) we record two kinds of directories,
