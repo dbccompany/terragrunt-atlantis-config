@@ -340,3 +340,24 @@ func TestGenerateCLIEngineExclude(t *testing.T) {
 	terragruntCLIOrSkip(t)
 	runTest(t, "golden/engine_cli_exclude.yaml", []string{"--engine", "cli", "--root", "../test_examples/cli_exclude"})
 }
+
+func TestDependencyWatchDirs(t *testing.T) {
+	got := dependencyWatchDirs("live/ws/config/job", []string{
+		"live/ws",                   // ancestor: sibling units live beneath it
+		"live/net/vpc",              // unrelated directory
+		"live/ws/config/job/nested", // descendant
+	})
+	want := []string{
+		"../../*.hcl", "../../*.tf*",
+		"../../../net/vpc/**/*.hcl", "../../../net/vpc/**/*.tf*",
+		"nested/**/*.hcl", "nested/**/*.tf*",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("want %v, got %v", want, got)
+	}
+}
+
+func TestGenerateCLIEngineAncestorDependency(t *testing.T) {
+	terragruntCLIOrSkip(t)
+	runTest(t, "golden/engine_cli_ancestor_dependency.yaml", []string{"--engine", "cli", "--cascade-dependencies=false", "--root", "../test_examples_issues/ancestor_dependency"})
+}

@@ -385,13 +385,33 @@ func watchEntryForPath(componentDir, filePath string) string {
 
 // dependencyWatchDirs renders dependency directories as when_modified globs
 // relative to the component's directory.
+//
+// A dependency that is an ancestor of the component (a unit whose directory
+// also holds its dependents, e.g. a workspace unit with its child units under
+// config/) is watched non-recursively. Its subtree is made of other projects
+// with their own triggers; a recursive glob would make every dependent
+// re-plan whenever any sibling changes.
 func dependencyWatchDirs(componentDir string, deps []string) []string {
 	watch := []string{}
 	for _, dep := range deps {
 		relDir := watchEntryForPath(componentDir, dep)
+		if isAncestorDir(dep, componentDir) {
+			watch = append(watch, relDir+"/*.hcl", relDir+"/*.tf*")
+			continue
+		}
 		watch = append(watch, relDir+"/**/*.hcl", relDir+"/**/*.tf*")
 	}
 	return watch
+}
+
+// isAncestorDir reports whether ancestor is a proper parent directory of
+// dir. Both are relative to the discovery root.
+func isAncestorDir(ancestor, dir string) bool {
+	rel, err := filepath.Rel(ancestor, dir)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // transitiveDependencies expands direct dependency edges through the full
