@@ -30,7 +30,7 @@ func resetForRun() error {
 	cascadeDependencies = true
 	ignoreParentTerragrunt = true
 	ignoreDependencyBlocks = false
-	watchAncestorDependenciesRecursively = false
+	disableWatchAncestorDependenciesRecursively = false
 	parallel = true
 	createWorkspace = false
 	createProjectName = false

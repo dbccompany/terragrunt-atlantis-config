@@ -388,18 +388,48 @@ func watchEntryForPath(componentDir, filePath string) string {
 //
 // A dependency that is an ancestor of the component (a unit whose directory
 // also holds its dependents, e.g. a workspace unit with its child units under
-// config/) is watched non-recursively unless recursiveAncestors is set. Its
-// subtree is made of other projects with their own triggers; a recursive glob
-// would make every dependent re-plan whenever any sibling changes.
-func dependencyWatchDirs(componentDir string, deps []string, recursiveAncestors bool) []string {
+// config/) is watched recursively like any other dependency when
+// recursiveAncestors is set. When it is not (see
+// --disable-watch-ancestor-dependencies-recursively) the ancestor is watched
+// non-recursively: its subtree is made of other projects with their own
+// triggers, and a recursive glob would make every dependent re-plan whenever
+// any sibling changes. The files the ancestor itself reads from beneath its
+// directory (reading, keyed by component path) are still watched, since a
+// change to them changes the ancestor.
+func dependencyWatchDirs(componentDir string, deps []string, recursiveAncestors bool, reading map[string][]string) []string {
 	watch := []string{}
 	for _, dep := range deps {
 		relDir := watchEntryForPath(componentDir, dep)
 		if !recursiveAncestors && isAncestorDir(dep, componentDir) {
 			watch = append(watch, relDir+"/*.hcl", relDir+"/*.tf*")
+			watch = append(watch, ancestorReadingWatch(componentDir, dep, reading[dep])...)
 			continue
 		}
 		watch = append(watch, relDir+"/**/*.hcl", relDir+"/**/*.tf*")
+	}
+	return watch
+}
+
+// ancestorReadingWatch renders the files an ancestor dependency reads from
+// beneath its own directory as exact when_modified entries relative to the
+// component's directory. Files directly in the ancestor directory are skipped
+// when the ancestor's non-recursive *.hcl / *.tf* globs already cover them.
+func ancestorReadingWatch(componentDir, ancestor string, reading []string) []string {
+	watch := []string{}
+	for _, file := range reading {
+		if !isAncestorDir(ancestor, file) {
+			continue
+		}
+		if filepath.Clean(filepath.Dir(file)) == filepath.Clean(ancestor) {
+			base := filepath.Base(file)
+			if okH, _ := filepath.Match("*.hcl", base); okH {
+				continue
+			}
+			if okT, _ := filepath.Match("*.tf*", base); okT {
+				continue
+			}
+		}
+		watch = append(watch, watchEntryForPath(componentDir, file))
 	}
 	return watch
 }
@@ -568,6 +598,11 @@ func cliEngineProjects(components []cliComponent, root string) ([]AtlantisProjec
 		direct[c.Path] = c.Dependencies
 	}
 
+	readingByPath := make(map[string][]string, len(components))
+	for _, c := range components {
+		readingByPath[c.Path] = c.Reading
+	}
+
 	depGraph := direct
 	if cascadeDependencies {
 		depGraph = transitiveDependencies(components, direct)
@@ -582,7 +617,7 @@ func cliEngineProjects(components []cliComponent, root string) ([]AtlantisProjec
 
 		watch := componentWatchFiles(c, c.Path)
 		if !ignoreDependencyBlocks {
-			watch = append(watch, dependencyWatchDirs(c.Path, depGraph[c.Path], watchAncestorDependenciesRecursively)...)
+			watch = append(watch, dependencyWatchDirs(c.Path, depGraph[c.Path], !disableWatchAncestorDependenciesRecursively, readingByPath)...)
 		}
 		if c.Type == "stack" {
 			// The CLI does not report edges from a stack to the unit sources
