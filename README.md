@@ -171,6 +171,11 @@ ancestor itself reads from beneath its directory (for example a `config/common.h
 to `job_a` no longer plans `job_b`. Dependencies on unrelated or descendant directories are not
 affected.
 
+Only the files that `terragrunt find --reading` reports the ancestor as reading are propagated this
+way. Files beneath the ancestor that Terragrunt does not report as read (for example a local module
+called from the ancestor's `.tf` files, or a file read with `file()`) no longer trigger the
+ancestor's dependents when the flag is set.
+
 Units **outside** the ancestor that depend on it (or, with `--cascade-dependencies`, on one of its
 children) still watch its full subtree, with or without the flag.
 
@@ -217,7 +222,7 @@ One way to customize the behavior of this module is through CLI flag values pass
 | `--root`                     | Path to the root directory of the git repo you want to build config for.                                                                                                        | current directory |
 | `--terraform-version`        | Default terraform version to specify for all modules. Can be overridden by locals                                                                                                | ""                |
 | `--ignore-dependency-blocks` | When true, dependencies found in `dependency` and `dependencies` blocks will be ignored                                                                                         | false             |
-| `--disable-watch-ancestor-dependencies-recursively` | CLI engine only. When true, a dependency on an ancestor directory is watched non-recursively (only the ancestor's own files and the files it reads from beneath its directory), so units beneath a shared ancestor no longer re-plan each other when one of them changes. See [Dependencies on an ancestor directory](#dependencies-on-an-ancestor-directory) | false             |
+| `--disable-watch-ancestor-dependencies-recursively` | CLI engine only. Watch ancestor-directory dependencies non-recursively. See [Dependencies on an ancestor directory](#dependencies-on-an-ancestor-directory)                     | false             |
 | `--filter`                   | Path or glob expression to the directory you want scope down the config for. Default is all files in root                                                                       | ""                |
 | `--filter-git`               | Only include projects whose autoplan triggers were touched between the given git ref and HEAD (e.g. `origin/main`). Diff-aware; both engines.                                   | ""                |
 | `--num-executors`            | Number of executors used for parallel generation of projects. Default is 15                                                                                                     | 15                |
