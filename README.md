@@ -151,6 +151,27 @@ If you specify `extra_atlantis_dependencies` in the parent Terragrunt module, th
 2. Absolute paths will work as they would in a child module, and the path in the output will be relative from the child module to the absolute path
 3. Relative paths, like the string `"foo.json"`, will be evaluated as relative to the Child module. This means that if you need something relative to the parent module, you should use something like `"${get_parent_terragrunt_dir()}/foo.json"`
 
+## Dependencies on an ancestor directory
+
+With `--engine=cli`, a `dependency` on another directory is watched through a recursive glob
+(`<dep>/**/*.hcl`, `<dep>/**/*.tf*`). When the dependency is an **ancestor** of the unit, i.e. a
+unit whose directory also contains its dependents, that glob would also cover the unit's sibling
+units, so a change to any one of them would re-plan all of them:
+
+```
+workspace/terragrunt.hcl                # unit whose outputs the units below use
+workspace/config/job_a/terragrunt.hcl   # dependency { config_path = "../.." }
+workspace/config/job_b/terragrunt.hcl   # dependency { config_path = "../.." }
+```
+
+By default only the ancestor's own files (`<dep>/*.hcl`, `<dep>/*.tf*`) are watched for such a
+dependency. A change to `workspace/` still plans `job_a` and `job_b`, but a change to `job_a` no longer
+plans `job_b`. Dependencies on unrelated or descendant directories are not affected.
+
+Pass `--watch-ancestor-dependencies-recursively` to restore the previous behaviour and watch the
+ancestor's whole subtree. This only matters if that subtree contains files that are not themselves
+Terragrunt units (for example a local module) and that dependents should re-plan on.
+
 ## Values sidecar (`terragrunt.values.hcl`)
 
 Terragrunt's stacks era introduced a convention where a `terragrunt.values.hcl`
@@ -194,6 +215,7 @@ One way to customize the behavior of this module is through CLI flag values pass
 | `--root`                     | Path to the root directory of the git repo you want to build config for.                                                                                                        | current directory |
 | `--terraform-version`        | Default terraform version to specify for all modules. Can be overridden by locals                                                                                                | ""                |
 | `--ignore-dependency-blocks` | When true, dependencies found in `dependency` and `dependencies` blocks will be ignored                                                                                         | false             |
+| `--watch-ancestor-dependencies-recursively` | CLI engine only. When true, a dependency on an ancestor directory is watched recursively (`<dep>/**`), so every unit beneath that ancestor re-plans when any sibling changes (the previous behaviour). When false, only the ancestor's own files are watched; dependents still re-plan when the ancestor changes | false             |
 | `--filter`                   | Path or glob expression to the directory you want scope down the config for. Default is all files in root                                                                       | ""                |
 | `--filter-git`               | Only include projects whose autoplan triggers were touched between the given git ref and HEAD (e.g. `origin/main`). Diff-aware; both engines.                                   | ""                |
 | `--num-executors`            | Number of executors used for parallel generation of projects. Default is 15                                                                                                     | 15                |

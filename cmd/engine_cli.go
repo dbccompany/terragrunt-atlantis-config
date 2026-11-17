@@ -388,14 +388,14 @@ func watchEntryForPath(componentDir, filePath string) string {
 //
 // A dependency that is an ancestor of the component (a unit whose directory
 // also holds its dependents, e.g. a workspace unit with its child units under
-// config/) is watched non-recursively. Its subtree is made of other projects
-// with their own triggers; a recursive glob would make every dependent
-// re-plan whenever any sibling changes.
-func dependencyWatchDirs(componentDir string, deps []string) []string {
+// config/) is watched non-recursively unless recursiveAncestors is set. Its
+// subtree is made of other projects with their own triggers; a recursive glob
+// would make every dependent re-plan whenever any sibling changes.
+func dependencyWatchDirs(componentDir string, deps []string, recursiveAncestors bool) []string {
 	watch := []string{}
 	for _, dep := range deps {
 		relDir := watchEntryForPath(componentDir, dep)
-		if isAncestorDir(dep, componentDir) {
+		if !recursiveAncestors && isAncestorDir(dep, componentDir) {
 			watch = append(watch, relDir+"/*.hcl", relDir+"/*.tf*")
 			continue
 		}
@@ -582,7 +582,7 @@ func cliEngineProjects(components []cliComponent, root string) ([]AtlantisProjec
 
 		watch := componentWatchFiles(c, c.Path)
 		if !ignoreDependencyBlocks {
-			watch = append(watch, dependencyWatchDirs(c.Path, depGraph[c.Path])...)
+			watch = append(watch, dependencyWatchDirs(c.Path, depGraph[c.Path], watchAncestorDependenciesRecursively)...)
 		}
 		if c.Type == "stack" {
 			// The CLI does not report edges from a stack to the unit sources

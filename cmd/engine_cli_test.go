@@ -342,22 +342,66 @@ func TestGenerateCLIEngineExclude(t *testing.T) {
 }
 
 func TestDependencyWatchDirs(t *testing.T) {
-	got := dependencyWatchDirs("live/ws/config/job", []string{
+	deps := []string{
 		"live/ws",                   // ancestor: sibling units live beneath it
 		"live/net/vpc",              // unrelated directory
 		"live/ws/config/job/nested", // descendant
-	})
+	}
+
+	got := dependencyWatchDirs("live/ws/config/job", deps, false)
 	want := []string{
 		"../../*.hcl", "../../*.tf*",
 		"../../../net/vpc/**/*.hcl", "../../../net/vpc/**/*.tf*",
 		"nested/**/*.hcl", "nested/**/*.tf*",
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("want %v, got %v", want, got)
+		t.Fatalf("non-recursive ancestors: want %v, got %v", want, got)
+	}
+
+	got = dependencyWatchDirs("live/ws/config/job", deps, true)
+	want = []string{
+		"../../**/*.hcl", "../../**/*.tf*",
+		"../../../net/vpc/**/*.hcl", "../../../net/vpc/**/*.tf*",
+		"nested/**/*.hcl", "nested/**/*.tf*",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("recursive ancestors: want %v, got %v", want, got)
 	}
 }
 
 func TestGenerateCLIEngineAncestorDependency(t *testing.T) {
 	terragruntCLIOrSkip(t)
 	runTest(t, "golden/engine_cli_ancestor_dependency.yaml", []string{"--engine", "cli", "--cascade-dependencies=false", "--root", "../test_examples_issues/ancestor_dependency"})
+}
+
+func TestGenerateCLIEngineAncestorDependencyRecursiveFlag(t *testing.T) {
+	terragruntCLIOrSkip(t)
+	runTest(t, "golden/engine_cli_ancestor_dependency_recursive.yaml", []string{"--engine", "cli", "--cascade-dependencies=false", "--watch-ancestor-dependencies-recursively", "--root", "../test_examples_issues/ancestor_dependency"})
+}
+
+func TestIsAncestorDir(t *testing.T) {
+	cases := []struct {
+		name       string
+		ancestor   string
+		dir        string
+		isAncestor bool
+	}{
+		{"direct parent", "live/ws", "live/ws/job", true},
+		{"deep descendant", "live/ws", "live/ws/config/jobs/a", true},
+		{"same directory", "live/ws", "live/ws", false},
+		{"dir is the ancestor's parent", "live/ws", "live", false},
+		{"sibling branch", "live/ws", "live/net/vpc", false},
+		{"shared name prefix is not containment", "live/app", "live/app2/job", false},
+		{"child whose name starts with dots", "live/ws", "live/ws/..foo", true},
+		{"repo root is ancestor of everything", ".", "live/ws", true},
+		{"repo root is not its own ancestor", ".", ".", false},
+		{"nothing is an ancestor of the root", "live/ws", ".", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := isAncestorDir(c.ancestor, c.dir); got != c.isAncestor {
+				t.Fatalf("isAncestorDir(%q, %q) = %v, want %v", c.ancestor, c.dir, got, c.isAncestor)
+			}
+		})
+	}
 }

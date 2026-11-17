@@ -1291,6 +1291,7 @@ var autoMerge bool
 var ignoreParentTerragrunt bool
 var createParentProject bool
 var ignoreDependencyBlocks bool
+var watchAncestorDependenciesRecursively bool
 var parallel bool
 var deleteSourceBranchOnMerge bool
 var createWorkspace bool
@@ -1350,6 +1351,7 @@ func init() {
 	generateCmd.PersistentFlags().BoolVar(&ignoreParentTerragrunt, "ignore-parent-terragrunt", true, "Ignore parent terragrunt configs (those which don't reference a terraform module). Default is enabled")
 	generateCmd.PersistentFlags().BoolVar(&createParentProject, "create-parent-project", false, "Create a project for the parent terragrunt configs (those which don't reference a terraform module). Default is disabled")
 	generateCmd.PersistentFlags().BoolVar(&ignoreDependencyBlocks, "ignore-dependency-blocks", false, "When true, dependencies found in `dependency` blocks will be ignored")
+	generateCmd.PersistentFlags().BoolVar(&watchAncestorDependenciesRecursively, "watch-ancestor-dependencies-recursively", false, "CLI engine only. When true, a dependency on an ancestor directory is watched recursively (<dep>/**), so every unit beneath that ancestor re-plans when any sibling changes. When false, only the ancestor's own files are watched. Default is false")
 	generateCmd.PersistentFlags().BoolVar(&parallel, "parallel", true, "Enables plans and applys to happen in parallel. Default is enabled")
 	generateCmd.PersistentFlags().BoolVar(&createWorkspace, "create-workspace", false, "Use different workspace for each project. Default is use default workspace")
 	generateCmd.PersistentFlags().BoolVar(&createProjectName, "create-project-name", false, "Add different name for each project. Default is false")
