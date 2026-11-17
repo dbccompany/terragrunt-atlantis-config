@@ -3,7 +3,7 @@ terraform {
 }
 
 dependency "ws" {
-  config_path = "../.."
+  config_path = ".."
 }
 
 inputs = {

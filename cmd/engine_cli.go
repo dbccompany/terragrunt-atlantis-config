@@ -503,6 +503,15 @@ func normalizeFilterPaths(filters []string, root string) []string {
 
 // cliEngineProjects converts discovered components into Atlantis projects.
 func cliEngineProjects(components []cliComponent, root string) ([]AtlantisProject, error) {
+	// Record what every discovered component reads before any of them is
+	// dropped below (ignore-parent, exclude blocks, --filter, stack-owned
+	// units): a dependency that is not itself a project still changes when a
+	// file it reads changes, so its dependents must watch that file.
+	readingByPath := make(map[string][]string, len(components))
+	for _, c := range components {
+		readingByPath[c.Path] = c.Reading
+	}
+
 	// Same skip-parents default as the library engine: configs with no
 	// terraform source (root includes, wrapper files) are not projects.
 	if ignoreParentTerragrunt {
@@ -596,11 +605,6 @@ func cliEngineProjects(components []cliComponent, root string) ([]AtlantisProjec
 	direct := make(map[string][]string, len(components))
 	for _, c := range components {
 		direct[c.Path] = c.Dependencies
-	}
-
-	readingByPath := make(map[string][]string, len(components))
-	for _, c := range components {
-		readingByPath[c.Path] = c.Reading
 	}
 
 	depGraph := direct
