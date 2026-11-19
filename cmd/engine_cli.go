@@ -341,11 +341,10 @@ func stackLocalSourceDirs(stackFile string, root string) []string {
 
 	dirs := []string{}
 	stackDir := filepath.Dir(stackFile)
-	collect := func(source *string) {
-		if source == nil || *source == "" {
+	collect := func(src string) {
+		if src == "" {
 			return
 		}
-		src := *source
 		if !filepath.IsAbs(src) {
 			src = filepath.Clean(filepath.Join(stackDir, src))
 		}
@@ -359,12 +358,33 @@ func stackLocalSourceDirs(stackFile string, root string) []string {
 		}
 	}
 	for _, u := range probe.Units {
-		collect(u.Source)
+		collect(firstString(u.Source))
 	}
 	for _, s := range probe.Stacks {
-		collect(s.Source)
+		collect(firstString(s.Source))
+	}
+
+	// The literal decode above leaves template-based sources unset. Extract
+	// the common repo-root helpers from the raw file instead, so catalog
+	// sources like "${get_repo_root()}/common/stacks/vpc" still feed the
+	// stack project's when_modified — otherwise catalog-only PRs never
+	// autoplan. Anything still containing "${" after the helpers is
+	// unresolvable at generation time and stays unwatched.
+	for _, m := range stackRepoRootSourceRe.FindAllStringSubmatch(raw, -1) {
+		collect(filepath.Join(root, strings.TrimPrefix(m[2], "/")))
 	}
 	return dirs
+}
+
+// stackRepoRootSourceRe matches source attributes whose value is built from
+// get_repo_root()/get_path_to_repo_root() with an optional suffix path.
+var stackRepoRootSourceRe = regexp.MustCompile(`(?m)^\s*source\s*=\s*"\$\{(get_repo_root|get_path_to_repo_root)\(\)\}(/[^"]*)?"`)
+
+func firstString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // watchEntryForPath renders one known file path (relative to the discovery
