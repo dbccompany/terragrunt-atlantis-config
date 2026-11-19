@@ -38,6 +38,7 @@ func resetForRun() error {
 	deleteSourceBranchOnMerge = false
 	gitFilter = ""
 	stackWorkflow = ""
+	disableWatchAncestorDependenciesRecursively = false
 	return nil
 }
 

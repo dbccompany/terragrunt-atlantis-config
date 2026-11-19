@@ -189,6 +189,7 @@ var gitRoot string
 var autoPlan bool
 var autoMerge bool
 var ignoreDependencyBlocks bool
+var disableWatchAncestorDependenciesRecursively bool
 var parallel bool
 var deleteSourceBranchOnMerge bool
 var createWorkspace bool
@@ -239,6 +240,7 @@ func init() {
 	generateCmd.PersistentFlags().BoolVar(&autoMerge, "automerge", false, "Enable auto merge. Default is disabled")
 	generateCmd.PersistentFlags().BoolVar(&deleteSourceBranchOnMerge, "delete-source-branch-on-merge", false, "Tell Atlantis to delete the source branch after merge. Overrides any preserved value from a previous atlantis.yaml")
 	generateCmd.PersistentFlags().BoolVar(&ignoreDependencyBlocks, "ignore-dependency-blocks", false, "When true, dependencies found in `dependency` blocks will be ignored")
+	generateCmd.PersistentFlags().BoolVar(&disableWatchAncestorDependenciesRecursively, "disable-watch-ancestor-dependencies-recursively", false, "CLI engine only. When true, a dependency on an ancestor directory (a unit whose directory also contains its dependents) is watched non-recursively: only the ancestor's own files, and the files it reads from beneath its directory, so sibling units no longer re-plan each other. Default is false, which watches every .hcl and .tf* file in the ancestor's whole subtree (<dep>/**/*.hcl, <dep>/**/*.tf*)")
 	generateCmd.PersistentFlags().BoolVar(&parallel, "parallel", true, "Enables plans and applys to happen in parallel. Default is enabled")
 	generateCmd.PersistentFlags().BoolVar(&createWorkspace, "create-workspace", false, "Use different workspace for each project. Default is use default workspace")
 	generateCmd.PersistentFlags().BoolVar(&createProjectName, "create-project-name", false, "Add different name for each project. Default is false")

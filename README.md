@@ -125,6 +125,34 @@ library-engine features and are removed. On the cli engine:
 - pinning use `.terraform-version` or `--terraform-version`
 - stack boundaries are declared in `terragrunt.stack.hcl`
 
+## Dependencies on an ancestor directory
+
+With `--engine=cli`, a `dependency` on another directory is watched through a recursive glob
+(`<dep>/**/*.hcl`, `<dep>/**/*.tf*`). When the dependency is an **ancestor** of the unit, i.e. a
+unit whose directory also contains its dependents, that glob also covers the unit's sibling units,
+so a change to any one of them re-plans all of them:
+
+```
+workspace/terragrunt.hcl                # unit whose outputs the units below use
+workspace/config/job_a/terragrunt.hcl   # dependency { config_path = "../.." }
+workspace/config/job_b/terragrunt.hcl   # dependency { config_path = "../.." }
+```
+
+Pass `--disable-watch-ancestor-dependencies-recursively` to watch such an ancestor
+non-recursively instead: only its own files (`<dep>/*.hcl`, `<dep>/*.tf*`), plus any file the
+ancestor itself reads from beneath its directory (for example a `config/common.hcl` loaded with
+`read_terragrunt_config`). A change to `workspace/` still plans `job_a` and `job_b`, but a change
+to `job_a` no longer plans `job_b`. Dependencies on unrelated or descendant directories are not
+affected.
+
+Only the files that `terragrunt find --reading` reports the ancestor as reading are propagated this
+way. Files beneath the ancestor that Terragrunt does not report as read (for example a local module
+called from the ancestor's `.tf` files, or a file read with `file()`) no longer trigger the
+ancestor's dependents when the flag is set.
+
+Units **outside** the ancestor that depend on it (or, with `--cascade-dependencies`, on one of its
+children) still watch its full subtree, with or without the flag.
+
 ## Project generation
 
 These flags offer additional options to generate Atlantis projects based on HCL configuration files in the terragrunt hierarchy. This, for example, enables Atlantis to use `terragrunt run-all` workflows on staging environment or product levels in a terragrunt hierarchy. Mostly useful in large terragrunt projects containing lots of interdependent child modules. Atlantis `locals` can be used in the defined project marker files.

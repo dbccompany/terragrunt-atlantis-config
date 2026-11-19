@@ -9,6 +9,10 @@ projects:
     - '**/*.tf*'
     - '*.hcl'
     - '*.tf*'
+    - ../../catalog/db/**/*.hcl
+    - ../../catalog/db/**/*.tf*
+    - ../../catalog/vpc/**/*.hcl
+    - ../../catalog/vpc/**/*.tf*
   dir: live/prod
   workflow: terragrunt-stack
 - autoplan:

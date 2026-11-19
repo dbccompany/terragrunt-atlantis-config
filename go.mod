@@ -4,7 +4,7 @@ go 1.27
 
 require (
 	github.com/ghodss/yaml v1.0.0
-	github.com/hashicorp/hcl/v2 v2.24.0
+	github.com/hashicorp/hcl/v2 v2.25.0
 	github.com/sirupsen/logrus v1.10.2
 	github.com/spf13/cobra v1.10.2
 )
