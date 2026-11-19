@@ -340,3 +340,162 @@ func TestGenerateCLIEngineExclude(t *testing.T) {
 	terragruntCLIOrSkip(t)
 	runTest(t, "golden/engine_cli_exclude.yaml", []string{"--engine", "cli", "--root", "../test_examples/cli_exclude"})
 }
+
+func TestDependencyWatchDirs(t *testing.T) {
+	deps := []string{
+		"live/ws",                   // ancestor: sibling units live beneath it
+		"live/net/vpc",              // unrelated directory
+		"live/ws/config/job/nested", // descendant
+	}
+	reading := map[string][]string{
+		"live/ws": {
+			"live/ws/terragrunt.hcl",     // own-dir hcl: covered by ../../*.hcl
+			"live/ws/config/common.hcl",  // read from beneath the ancestor
+			"live/ws/config/job/in.json", // read from beneath, next to the dependent
+			"live/root.hcl",              // outside the ancestor: not propagated
+		},
+	}
+
+	got := dependencyWatchDirs("live/ws/config/job", deps, false, reading)
+	want := []string{
+		"../../*.hcl", "../../*.tf*",
+		"../common.hcl", "in.json",
+		"../../../net/vpc/**/*.hcl", "../../../net/vpc/**/*.tf*",
+		"nested/**/*.hcl", "nested/**/*.tf*",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("non-recursive ancestors: want %v, got %v", want, got)
+	}
+
+	got = dependencyWatchDirs("live/ws/config/job", deps, true, reading)
+	want = []string{
+		"../../**/*.hcl", "../../**/*.tf*",
+		"../../../net/vpc/**/*.hcl", "../../../net/vpc/**/*.tf*",
+		"nested/**/*.hcl", "nested/**/*.tf*",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("recursive ancestors: want %v, got %v", want, got)
+	}
+}
+
+func TestGenerateCLIEngineAncestorDependency(t *testing.T) {
+	terragruntCLIOrSkip(t)
+	runTest(t, "golden/engine_cli_ancestor_dependency.yaml", []string{"--engine", "cli", "--cascade-dependencies=false", "--root", "../test_examples_issues/ancestor_dependency"})
+}
+
+func TestGenerateCLIEngineAncestorDependencyNonRecursive(t *testing.T) {
+	terragruntCLIOrSkip(t)
+	runTest(t, "golden/engine_cli_ancestor_dependency_non_recursive.yaml", []string{"--engine", "cli", "--cascade-dependencies=false", "--disable-watch-ancestor-dependencies-recursively", "--root", "../test_examples_issues/ancestor_dependency"})
+}
+
+func TestIsAncestorDir(t *testing.T) {
+	cases := []struct {
+		name       string
+		ancestor   string
+		dir        string
+		isAncestor bool
+	}{
+		{"direct parent", "live/ws", "live/ws/job", true},
+		{"deep descendant", "live/ws", "live/ws/config/jobs/a", true},
+		{"same directory", "live/ws", "live/ws", false},
+		{"dir is the ancestor's parent", "live/ws", "live", false},
+		{"sibling branch", "live/ws", "live/net/vpc", false},
+		{"shared name prefix is not containment", "live/app", "live/app2/job", false},
+		{"child whose name starts with dots", "live/ws", "live/ws/..foo", true},
+		{"repo root is ancestor of everything", ".", "live/ws", true},
+		{"repo root is not its own ancestor", ".", ".", false},
+		{"nothing is an ancestor of the root", "live/ws", ".", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := isAncestorDir(c.ancestor, c.dir); got != c.isAncestor {
+				t.Fatalf("isAncestorDir(%q, %q) = %v, want %v", c.ancestor, c.dir, got, c.isAncestor)
+			}
+		})
+	}
+}
+
+// ancestorTouched generates the cli-engine config for an ancestor-dependency
+// fixture (default --cascade-dependencies) and returns the projects whose
+// autoplan watch is touched by a change to the given file.
+func ancestorTouched(t *testing.T, fixture string, extraArgs []string, changed string) map[string]bool {
+	t.Helper()
+	if err := resetForRun(); err != nil {
+		t.Fatal(err)
+	}
+	filename := "test_artifacts/ancestor_touched.yaml"
+	defer os.Remove(filename)
+
+	args := append([]string{
+		"generate", "--engine", "cli", "--output", filename,
+		"--root", "../test_examples_issues/" + fixture,
+	}, extraArgs...)
+	content, err := RunWithFlags(filename, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &AtlantisConfig{}
+	if err := yaml.Unmarshal(content, p); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, proj := range p.Projects {
+		if projectTouchedBy(proj, []string{changed}, "") {
+			got[proj.Dir] = true
+		}
+	}
+	return got
+}
+
+// The invariant behind --disable-watch-ancestor-dependencies-recursively: a
+// change to the ancestor (including a file it reads from beneath itself) plans
+// every dependent, while a change to one dependent does not plan its siblings.
+// Without the flag the ancestor's whole subtree is watched, as before.
+// Asserted semantically, not with a golden file.
+func TestGenerateCLIEngineAncestorDependencyInvariant(t *testing.T) {
+	terragruntCLIOrSkip(t)
+
+	const fixture = "ancestor_dependency_reading"
+	all := map[string]bool{"ws": true, "ws/job_a": true, "ws/job_b": true}
+	bothJobs := map[string]bool{"ws/job_a": true, "ws/job_b": true}
+	disable := []string{"--disable-watch-ancestor-dependencies-recursively"}
+
+	// Default: unchanged behaviour, a dependent change plans its siblings too.
+	if got := ancestorTouched(t, fixture, nil, "ws/job_a/terragrunt.hcl"); !reflect.DeepEqual(got, bothJobs) {
+		t.Fatalf("default: a dependent change plans both dependents: want %v, got %v", bothJobs, got)
+	}
+
+	for name, changed := range map[string]string{
+		"ancestor unit":                 "ws/terragrunt.hcl",
+		"file the ancestor reads below": "ws/shared/common.hcl",
+	} {
+		if got := ancestorTouched(t, fixture, disable, changed); !reflect.DeepEqual(got, all) {
+			t.Fatalf("%s: want all of %v planned, got %v", name, all, got)
+		}
+	}
+
+	if got, want := ancestorTouched(t, fixture, disable, "ws/job_a/terragrunt.hcl"), map[string]bool{"ws/job_a": true}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("a dependent must not plan its siblings: want %v, got %v", want, got)
+	}
+}
+
+// An ancestor dependency that is not itself a project (no terraform source, so
+// ignore-parent drops it; or excluded by its exclude block) still changes when
+// a file it reads changes, so its dependents must keep watching that file when
+// ancestors are watched non-recursively.
+func TestGenerateCLIEngineAncestorDependencyNotAProject(t *testing.T) {
+	terragruntCLIOrSkip(t)
+
+	bothDependents := map[string]bool{"ws/a": true, "ws/b": true}
+	for _, fixture := range []string{"ancestor_dependency_no_source", "ancestor_dependency_excluded"} {
+		for name, args := range map[string][]string{
+			"default":  nil,
+			"disabled": {"--disable-watch-ancestor-dependencies-recursively"},
+		} {
+			got := ancestorTouched(t, fixture, args, "ws/shared/common.hcl")
+			if !reflect.DeepEqual(got, bothDependents) {
+				t.Fatalf("%s (%s): a change to a file the ancestor reads must plan both dependents: want %v, got %v", fixture, name, bothDependents, got)
+			}
+		}
+	}
+}
