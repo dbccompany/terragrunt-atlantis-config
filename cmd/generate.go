@@ -423,6 +423,13 @@ func createProject(ctx context.Context, sourcePath string) (*AtlantisProject, er
 		terraformDistribution = locals.TerraformDistribution
 	}
 
+	projectDir := filepath.ToSlash(relativeSourceDir)
+	whenModified := filterWhenModifiedExcludes(
+		projectDir,
+		relativeDependencies,
+		mergedWhenModifiedExcludeGlobs(locals),
+	)
+
 	project := &AtlantisProject{
 		Dir:                   filepath.ToSlash(relativeSourceDir),
 		Workflow:              workflow,
@@ -431,7 +438,7 @@ func createProject(ctx context.Context, sourcePath string) (*AtlantisProject, er
 		ApplyRequirements:     applyRequirements,
 		Autoplan: AutoplanConfig{
 			Enabled:      resolvedAutoPlan,
-			WhenModified: uniqueStrings(relativeDependencies),
+			WhenModified: uniqueStrings(whenModified),
 		},
 	}
 
@@ -576,15 +583,25 @@ func createHclProject(ctx context.Context, sourcePaths []string, workingDir stri
 		return nil, err
 	}
 
+	projectDir := filepath.ToSlash(dir)
+	allWhenModified := uniqueStrings(
+		append(childDependencies, projectHclDependencies...),
+	)
+	allWhenModified = filterWhenModifiedExcludes(
+		projectDir,
+		allWhenModified,
+		mergedWhenModifiedExcludeGlobs(locals),
+	)
+
 	project := &AtlantisProject{
-		Dir:                   filepath.ToSlash(dir),
+		Dir:                   projectDir,
 		Workflow:              workflow,
 		TerraformVersion:      terraformVersion,
 		TerraformDistribution: terraformDistribution,
 		ApplyRequirements:     applyRequirements,
 		Autoplan: AutoplanConfig{
 			Enabled:      resolvedAutoPlan,
-			WhenModified: uniqueStrings(append(childDependencies, projectHclDependencies...)),
+			WhenModified: allWhenModified,
 		},
 	}
 
@@ -1309,6 +1326,7 @@ var projectNameRegex = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
 var filterPaths []string
 var excludePaths []string
 var gitFilter string
+var whenModifiedExcludePaths []string
 var outputPath string
 var preserveWorkflows bool
 var preserveProjects bool
@@ -1364,6 +1382,7 @@ func init() {
 	generateCmd.PersistentFlags().StringSliceVar(&filterPaths, "filter", []string{}, "Comma-separated paths or glob expressions to the directories you want scope down the config for. Default is all files in root.")
 	generateCmd.PersistentFlags().StringSliceVar(&excludePaths, "exclude", []string{}, "Comma-separated paths or glob expressions to subtract from the discovered projects. Directories and everything beneath a matched directory are dropped.")
 	generateCmd.PersistentFlags().StringVar(&gitFilter, "filter-git", "", "Only include projects whose autoplan triggers were touched between the given git ref and HEAD (e.g. origin/main). Works with both engines.")
+	generateCmd.PersistentFlags().StringSliceVar(&whenModifiedExcludePaths, "when-modified-exclude-paths", []string{}, "Comma-separated repo-relative globs omitted from each project's autoplan when_modified (merged with locals atlantis_when_modified_exclude)")
 	generateCmd.PersistentFlags().StringVar(&gitRoot, "root", pwd, "Path to the root directory of the git repo you want to build config for. Default is current dir")
 	generateCmd.PersistentFlags().StringVar(&defaultTerraformVersion, "terraform-version", "", "Default terraform version to specify for all modules. Can be overriden by locals")
 	generateCmd.PersistentFlags().StringVar(&defaultTerraformDistribution, "terraform-distribution", "", "Default terraform distribution to specify for all modules (e.g. 'tofu'). Can be overriden by the atlantis_terraform_distribution locals")

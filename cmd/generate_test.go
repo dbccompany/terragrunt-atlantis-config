@@ -38,6 +38,7 @@ func resetForRun() error {
 	preserveProjects = true
 	defaultWorkflow = ""
 	filterPaths = []string{}
+	whenModifiedExcludePaths = []string{}
 	outputPath = ""
 	defaultTerraformVersion = ""
 	defaultApplyRequirements = []string{}
@@ -202,10 +203,38 @@ func TestNonStringErrorOnExtraDeclaredDependencies(t *testing.T) {
 	}
 }
 
+func TestNonStringErrorOnWhenModifiedExclude(t *testing.T) {
+	err := resetForRun()
+	if err != nil {
+		t.Error("Failed to reset default flags")
+		return
+	}
+
+	rootCmd.SetArgs([]string{
+		"generate",
+		"--root",
+		filepath.Join("..", "test_examples_errors", "when_modified_exclude_error"),
+	})
+	err = rootCmd.Execute()
+
+	expectedError := "atlantis_when_modified_exclude contains non-string value at position 2"
+	if err == nil || err.Error() != expectedError {
+		t.Errorf("Expected error '%s', got '%v'", expectedError, err)
+		return
+	}
+}
+
 func TestLocalTerraformModuleSource(t *testing.T) {
 	runTest(t, filepath.Join("golden", "local_terraform_module.yaml"), []string{
 		"--root",
 		filepath.Join("..", "test_examples", "local_terraform_module_source"),
+	})
+}
+
+func TestWhenModifiedExcludeLocal(t *testing.T) {
+	runTest(t, filepath.Join("golden", "when_modified_exclude.yaml"), []string{
+		"--root",
+		filepath.Join("..", "test_examples", "when_modified_exclude"),
 	})
 }
 

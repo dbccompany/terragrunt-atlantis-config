@@ -27,6 +27,9 @@ type ResolvedLocals struct {
 	// Extra dependencies that can be hardcoded in config
 	ExtraAtlantisDependencies []string
 
+	// Repo-relative globs omitted from autoplan when_modified.
+	AtlantisWhenModifiedExclude []string
+
 	// If set, a single module will have autoplan turned to this setting
 	AutoPlan *bool
 
@@ -102,6 +105,8 @@ func mergeResolvedLocals(parent ResolvedLocals, child ResolvedLocals) ResolvedLo
 	}
 
 	parent.ExtraAtlantisDependencies = append(parent.ExtraAtlantisDependencies, child.ExtraAtlantisDependencies...)
+
+	parent.AtlantisWhenModifiedExclude = append(parent.AtlantisWhenModifiedExclude, child.AtlantisWhenModifiedExclude...)
 
 	return parent
 }
@@ -198,6 +203,23 @@ func resolveLocals(localsAsCty cty.Value) (ResolvedLocals, error) {
 
 			resolved.ExtraAtlantisDependencies = append(
 				resolved.ExtraAtlantisDependencies,
+				filepath.ToSlash(val.AsString()),
+			)
+		}
+	}
+
+	excludeAsCty, ok := rawLocals["atlantis_when_modified_exclude"]
+	if ok {
+		it := excludeAsCty.ElementIterator()
+		for it.Next() {
+			pos, val := it.Element()
+			if !val.Type().Equals(cty.String) {
+				posInt, _ := pos.AsBigFloat().Int64()
+				return resolved, asMarkerError(fmt.Errorf("atlantis_when_modified_exclude contains non-string value at position %d", posInt))
+			}
+
+			resolved.AtlantisWhenModifiedExclude = append(
+				resolved.AtlantisWhenModifiedExclude,
 				filepath.ToSlash(val.AsString()),
 			)
 		}
