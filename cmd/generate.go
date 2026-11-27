@@ -205,6 +205,7 @@ var projectNameRegex = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
 var filterPaths []string
 var excludePaths []string
 var gitFilter string
+var allowConfigCommandExecution bool
 var outputPath string
 var preserveWorkflows bool
 var preserveProjects bool
@@ -252,6 +253,7 @@ func init() {
 	generateCmd.PersistentFlags().StringVar(&outputPath, "output", "", "Path of the file where configuration will be generated. Default is not to write to file")
 	generateCmd.PersistentFlags().StringSliceVar(&filterPaths, "filter", []string{}, "Comma-separated paths or glob expressions to the directories you want scope down the config for. Default is all files in root.")
 	generateCmd.PersistentFlags().StringSliceVar(&excludePaths, "exclude", []string{}, "Comma-separated paths or glob expressions to subtract from the discovered projects. Directories and everything beneath a matched directory are dropped.")
+	generateCmd.PersistentFlags().BoolVar(&allowConfigCommandExecution, "allow-config-command-execution", false, "Allow command-executing config functions (run_cmd, sops_decrypt_file) during generation. Off by default.")
 	generateCmd.PersistentFlags().StringVar(&gitFilter, "filter-git", "", "Only include projects whose autoplan triggers were touched between the given git ref and HEAD (e.g. origin/main). Works with both engines.")
 	generateCmd.PersistentFlags().StringVar(&gitRoot, "root", pwd, "Path to the root directory of the git repo you want to build config for. Default is current dir")
 	generateCmd.PersistentFlags().StringVar(&defaultTerraformVersion, "terraform-version", "", "Default terraform version to specify for all modules. Can be overriden by locals")
