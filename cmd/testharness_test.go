@@ -39,6 +39,7 @@ func resetForRun() error {
 	gitFilter = ""
 	stackWorkflow = ""
 	disableWatchAncestorDependenciesRecursively = false
+	allowConfigCommandExecution = false
 	return nil
 }
 
