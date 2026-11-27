@@ -152,6 +152,7 @@ func runTerragruntFind(ctx context.Context, bin, root string) ([]cliComponent, e
 	}
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = root
+	cmd.Env = scrubbedEnv()
 
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -768,6 +769,15 @@ func applyCLIOrdering(projects []AtlantisProject, direct map[string][]string) {
 func generateProjectsWithCLIEngine(root string) ([]AtlantisProject, error) {
 	if len(projectHclFiles) > 0 {
 		return nil, cliEngineError("--project-hcl-files is not supported with --engine=cli")
+	}
+
+	// Refuse before invoking terragrunt: discovery evaluates repository
+	// config files, and command-executing functions in them must not run
+	// during generation unless the operator explicitly allows it.
+	if !allowConfigCommandExecution {
+		if err := guardConfigTree(root); err != nil {
+			return nil, err
+		}
 	}
 
 	bin, err := locateTerragruntCLI()
